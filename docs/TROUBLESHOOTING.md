@@ -1,145 +1,150 @@
-# عیب‌یابی / Troubleshooting
+# Troubleshooting
 
-اولین قدم همیشه:
+Always start here:
 
 ```bash
 sudo vt doctor
 ```
 
-این دستور باینری، معتبربودن `config.json`، فعال‌بودن سرویس، شنود پورت، اعتبار
-گواهی، ساعت سیستم، الگوریتم کنترل ازدحام و قوانین فایروال را یک‌جا بررسی می‌کند.
+It checks the binary, whether `config.json` parses, whether the service is
+active, whether the port is listening, the certificate's validity, the system
+clock, the congestion-control algorithm and the firewall rules — all at once.
 
 ---
 
-## ۱. اتصال برقرار نمی‌شود
+## 1. Cannot connect
 
-**قدم ۱ — سرویس روی سرور بالاست؟**
+**Step 1 — is the service up on the server?**
 ```bash
 sudo vt status
 sudo vt logs error
 ```
 
-**قدم ۲ — پورت از بیرون در دسترس است؟**
-از یک ماشین دیگر:
+**Step 2 — is the port reachable from outside?**
+From another machine:
 ```bash
 nc -vz <IP> <PORT>
 ```
-اگر بسته بود، به‌ترتیب این‌ها را چک کنید:
-1. فایروال خودِ سرور: `sudo ufw status numbered`
-2. **فایروال پنل ابری** (Hetzner Cloud Firewall، AWS Security Group،
-   DigitalOcean Firewall، Arvan، ابرآراز و ...) — این رایج‌ترین علت است و از
-   داخل سرور قابل دیدن نیست.
+If it is closed, check these in order:
+1. the server's own firewall: `sudo ufw status numbered`
+2. **the cloud provider's firewall** (Hetzner Cloud Firewall, AWS Security
+   Group, DigitalOcean Firewall, Arvan, etc.) — this is the most common cause
+   and it is invisible from inside the server.
 
-**قدم ۳ — پورت مسدود نشده باشد**
-بعضی ISPها پورت‌های خاصی را می‌بندند. با `sudo vt port random` یک پورت تازه
-بگیرید و دوباره امتحان کنید.
+**Step 3 — the port may be blocked upstream**
+Some ISPs block particular ports. Get a fresh one with `sudo vt port random`
+and try again.
 
 ---
 
-## ۲. حالت REALITY وصل نمی‌شود
+## 2. REALITY will not connect
 
-* سایت استتار (`SNI`) باید TLS 1.3 پشتیبانی کند و از سمت سرور قابل دسترس باشد:
+* The camouflage site (`SNI`) must support TLS 1.3 and must be reachable from
+  the server:
   ```bash
   echo Q | openssl s_client -connect www.microsoft.com:443 -servername www.microsoft.com -tls1_3 | head -5
   ```
-  اگر خطا داد، سایت را عوض کنید (`www.apple.com`, `www.cloudflare.com`, …) —
-  از منو گزینه‌ی ۱۰ (تغییر حالت) یا با نصب دوباره با `--sni`.
-* `pbk` (کلید عمومی) در کانفیگ کلاینت باید دقیقاً با `Public key` سرور یکی باشد.
-  بعد از هر بار چرخش کلید، کانفیگ کلاینت را دوباره بگیرید: `sudo vt viewconfig`.
-* ساعت سرور و کلاینت باید تقریباً یکی باشد.
+  If that fails, pick another site (`www.apple.com`, `www.cloudflare.com`, …)
+  via menu option 10 (switch mode), or reinstall with `--sni`.
+* `pbk` (the public key) in the client config must match the server's public
+  key exactly. After rotating keys, fetch a new config: `sudo vt viewconfig`.
+* The server's and the client's clocks must be roughly in sync.
 
 ---
 
-## ۳. خطای گواهی SSL
+## 3. TLS certificate errors
 
 ```bash
 sudo vt logs cert
 sudo vt renew-cert
 ```
 
-**صدور گواهی دامنه ناموفق بود**
-* رکورد A دامنه باید به آی‌پی عمومی سرور اشاره کند. برنامه در هنگام نصب این را
-  بررسی و گزارش می‌کند.
-* اگر دامنه پشت Cloudflare است و پروکسی (ابر نارنجی) روشن است، یا پروکسی را
-  خاموش کنید یا از روش DNS استفاده کنید:
+**Domain certificate issuance failed**
+* The domain's A record must point at the server's public IP. The installer
+  checks this and reports the result.
+* If the domain is behind Cloudflare with the orange cloud (proxy) enabled,
+  either turn the proxy off or use the DNS method:
   ```bash
   sudo vt install --mode ws-tls --domain your.domain \
        --cert letsencrypt-domain --acme dns \
        --dns-plugin dns_cf --dns-token "TOKEN" --yes
   ```
-* پورت ۸۰ باید باز باشد (روش standalone).
+* Port 80 must be open (standalone method).
 
-**گواهی آی‌پی صادر نشد**
-* پورت ۸۰ باید از اینترنت قابل دسترس باشد.
-* گواهی آی‌پی فقط با پروفایل `shortlived` و اعتبار ~۶ روز صادر می‌شود؛ اگر
-  acme.sh شما قدیمی است آن را به‌روز کنید:
+**IP certificate issuance failed**
+* Port 80 must be reachable from the internet.
+* IP certificates are only issued with the `shortlived` profile and a ~6 day
+  lifetime. If your acme.sh is old, upgrade it:
   ```bash
   sudo /etc/vt/acme.sh --upgrade --home /etc/vt/acme
   ```
-* اگر باز هم نشد، برنامه پیشنهاد گواهی خودامضا می‌دهد؛ یا دستی:
-  `sudo vt selfsigned-cert`
+* If it still fails the installer offers a self-signed certificate, or run
+  `sudo vt selfsigned-cert` yourself.
 
-**گواهی خودامضا: کلاینت خطا می‌دهد**
-طبیعی است — باید `allowInsecure` فعال باشد. برنامه این را خودش در لینک
-اشتراک (`allowInsecure=1`) می‌گذارد. اگر کانفیگ را دستی نوشته‌اید، اضافه‌اش کنید.
+**Self-signed: the client complains**
+That is expected — `allowInsecure` must be on. The program already puts it in
+the share link (`allowInsecure=1`); add it yourself if you wrote the config by
+hand.
 
 ---
 
-## ۴. سرویس بعد از ریبوت بالا نمی‌آید
+## 4. The service does not come back after a reboot
 
 ```bash
-systemctl is-enabled xray.service      # باید enabled باشد
+systemctl is-enabled xray.service      # should say enabled
 systemctl status xray.service
 sudo vt logs error
 ```
-اگر `disabled` بود:
+If it says `disabled`:
 ```bash
 sudo systemctl enable --now xray.service
 ```
 
 ---
 
-## ۵. سرعت پایین
+## 5. Slow
 
 ```bash
-sysctl net.ipv4.tcp_congestion_control    # باید bbr باشد
+sysctl net.ipv4.tcp_congestion_control    # should say bbr
 ```
-اگر `cubic` بود، BBR در هسته فعال نیست:
+If it says `cubic`, BBR is not loaded in the kernel:
 ```bash
 sudo modprobe tcp_bbr
 lsmod | grep bbr
 ```
-برای فعال‌سازی دائمی، `tcp_bbr` را به `/etc/modules-load.d/bbr.conf` اضافه کنید.
+To make it permanent, add `tcp_bbr` to `/etc/modules-load.d/bbr.conf`.
 
-موارد دیگر:
-* MTU: اگر از تونل دیگری (مثل WireGuard روی همان VPS) استفاده می‌کنید، MTU را
-  کم کنید.
-* برنامه به‌طور پیش‌فرض `net.ipv4.tcp_notsent_lowat` و بافرها را تنظیم می‌کند؛
-  اگر دستی sysctl را عوض کرده‌اید، `/etc/sysctl.d/99-vt-tunnel.conf` را ببینید.
+Other things to check:
+* MTU: if the VPS is itself inside another tunnel (e.g. WireGuard), lower the
+  MTU.
+* The installer already tunes `net.ipv4.tcp_notsent_lowat` and the socket
+  buffers; if you changed sysctl by hand, review
+  `/etc/sysctl.d/99-vt-tunnel.conf`.
 
 ---
 
-## ۶. فایروال دسترسی SSH را قطع کرد
+## 6. The firewall cut off SSH
 
-اگر هنوز یک نشست باز دارید، **آن را نبندید** و:
+If you still have an open session, **do not close it**, and run:
 ```bash
-sudo ufw allow 22/tcp        # یا پورت SSH واقعی شما
+sudo ufw allow 22/tcp        # or your real SSH port
 sudo ufw status numbered
 ```
-اگر هیچ نشستی ندارید، از کنسول پنل ابری (VNC/Console) وارد شوید و:
+If you have no session left, log in through the cloud provider's console
+(VNC/serial) and run:
 ```bash
 sudo ufw disable
 ```
 
 ---
 
-## ۷. نصب نیمه‌تمام ماند
+## 7. The install stopped halfway
 
-لاگ کامل نصب اینجا است:
+The full install log is here:
 ```bash
 sudo vt logs install
 ```
-برای شروع دوباره:
+To start over:
 ```bash
 sudo vt uninstall --purge --yes
 sudo vt install
@@ -147,13 +152,13 @@ sudo vt install
 
 ---
 
-## ۸. فایل‌های مفید برای گزارش مشکل
+## 8. Files that are useful in a bug report
 
 ```bash
 sudo vt doctor
 sudo vt logs error
 sudo vt logs install
-cat /etc/vt/vt.env | grep -v PRIVATE
+grep -v PRIVATE /etc/vt/vt.env
 ```
 
-> ⚠️ هرگز `REALITY_PRIVATE`، `privkey.pem` یا `users.json` را برای کسی نفرستید.
+> Never send `REALITY_PRIVATE`, `privkey.pem` or `users.json` to anyone.

@@ -49,7 +49,7 @@ VT_ROOT="$VT_ROOT_SAVE"
 eq "urlencode plain"        "abcXYZ019._-"  "$(urlencode 'abcXYZ019._-')"
 eq "urlencode slash"        "a%2Fb"         "$(urlencode 'a/b')"
 eq "urlencode space"        "a%20b"         "$(urlencode 'a b')"
-eq "urlencode utf8"         "%D8%B3%D9%84%D8%A7%D9%85" "$(urlencode 'سلام')"
+eq "urlencode utf8"         "%C3%A9t%C3%A9" "$(urlencode 'été')"
 eq "urlencode ws path"      "%2Fabc%2F"     "$(urlencode '/abc/')"
 
 # --- uuid / hex -----------------------------------------------------------
@@ -72,45 +72,45 @@ VT_ASSUME_YES=0
 # Regression: `ask` used to keep its answer in a local called `ans`, which
 # shadowed a caller variable of the same name, so the answer was lost.
 ans="untouched"
-ask ans "پورت" "random" <<<"random"
+ask ans "port" "random" <<<"random"
 eq "ask writes into a caller variable named ans" "random" "$ans"
 ans="untouched"
-ask ans "پورت" "random" <<<""
+ask ans "port" "random" <<<""
 eq "ask falls back to the default on empty input" "random" "$ans"
 MYVAR=""
-ask MYVAR "نام" "main" <<<""
+ask MYVAR "name" "main" <<<""
 eq "ask default" "main" "$MYVAR"
-ask MYVAR "نام" "main" <<<""
+ask MYVAR "name" "main" <<<""
 eq "ask default is idempotent" "main" "$MYVAR"
 
 # Regression: `confirm` used to return 0 for empty input no matter what the
 # declared default was, so "[y/N] + Enter" meant yes.
-confirm "خطرناک؟" n <<<"" && bad "confirm honours default n on empty input" "returned yes" || ok "confirm honours default n on empty input"
-confirm "ادامه؟" y <<<"" && ok "confirm honours default y on empty input" || bad "confirm honours default y on empty input" "returned no"
-confirm "ادامه؟" n <<<"y" && ok "confirm accepts explicit y" || bad "confirm accepts explicit y" "returned no"
-confirm "ادامه؟" y <<<"n" && bad "confirm accepts explicit n" "returned yes" || ok "confirm accepts explicit n"
-confirm "ادامه؟" y <<<"نه" && bad "confirm accepts Persian no" "returned yes" || ok "confirm accepts Persian no"
-confirm "ادامه؟" n <<<"بله" && ok "confirm accepts Persian yes" || bad "confirm accepts Persian yes" "returned no"
-confirm "ادامه؟" y <<<"garbage" && ok "confirm garbage falls back to default y" || bad "confirm garbage falls back to default y" "no"
-confirm "ادامه؟" n <<<"garbage" && bad "confirm garbage falls back to default n" "yes" || ok "confirm garbage falls back to default n"
+confirm "dangerous?" n <<<"" && bad "confirm honours default n on empty input" "returned yes" || ok "confirm honours default n on empty input"
+confirm "continue?" y <<<"" && ok "confirm honours default y on empty input" || bad "confirm honours default y on empty input" "returned no"
+confirm "continue?" n <<<"y" && ok "confirm accepts explicit y" || bad "confirm accepts explicit y" "returned no"
+confirm "continue?" y <<<"n" && bad "confirm accepts explicit n" "returned yes" || ok "confirm accepts explicit n"
+confirm "continue?" y <<<"no" && bad "confirm accepts the word no" "returned yes" || ok "confirm accepts the word no"
+confirm "continue?" n <<<"yes" && ok "confirm accepts the word yes" || bad "confirm accepts the word yes" "returned no"
+confirm "continue?" y <<<"garbage" && ok "confirm garbage falls back to default y" || bad "confirm garbage falls back to default y" "no"
+confirm "continue?" n <<<"garbage" && bad "confirm garbage falls back to default n" "yes" || ok "confirm garbage falls back to default n"
 
 idx=0
-menu_pick idx "عنوان" "الف" "ب" "پ" <<<""
+menu_pick idx "title" "alpha" "beta" "gamma" <<<""
 eq "menu_pick default on empty input" "1" "$idx"
-menu_pick idx "عنوان" "الف" "ب" "پ" <<<"2"
+menu_pick idx "title" "alpha" "beta" "gamma" <<<"2"
 eq "menu_pick picks the chosen entry" "2" "$idx"
-menu_pick idx "عنوان" "الف" "ب" "پ" <<<"9"
+menu_pick idx "title" "alpha" "beta" "gamma" <<<"9"
 eq "menu_pick clamps out-of-range to the default" "1" "$idx"
-menu_pick idx "عنوان" "الف" "ب" "پ" <<<"abc"
+menu_pick idx "title" "alpha" "beta" "gamma" <<<"abc"
 eq "menu_pick clamps non-numeric to the default" "1" "$idx"
 
 # ask_secret must not echo, but must still store the value.
 SECRET=""
-ask_secret SECRET "توکن" <<<"s3cr3t"
+ask_secret SECRET "token" <<<"s3cr3t"
 eq "ask_secret stores the value" "s3cr3t" "$SECRET"
 
 VT_ASSUME_YES=1
-confirm "با فرض بله، پیش‌فرض n باید نه بدهد" n && bad "VT_ASSUME_YES honours default n" "yes" || ok "VT_ASSUME_YES honours default n"
+confirm "with VT_ASSUME_YES, default n must answer no" n && bad "VT_ASSUME_YES honours default n" "yes" || ok "VT_ASSUME_YES honours default n"
 
 # --- validators -----------------------------------------------------------
 eq "is_ip v4"        yes "$(is_ip 1.2.3.4 && echo yes || echo no)"

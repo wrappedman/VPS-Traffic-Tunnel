@@ -25,11 +25,11 @@ build_xray_config() {
   case "$mode" in
     reality|tcp-tls) flow="${VT_FLOW:-xtls-rprx-vision}" ;;
     ws-tls) flow="" ;;
-    *) fail "حالت ناشناخته: $mode" ;;
+    *) fail "unknown mode: $mode" ;;
   esac
   clients=$(users_clients_json "$flow")
   if [[ -z "$clients" || "$clients" == "[]" ]]; then
-    fail "هیچ کاربری تعریف نشده؛ ابتدا یک کاربر اضافه کنید."
+    fail "no users defined; add a user first."
   fi
 
   local stream
@@ -157,7 +157,7 @@ $rules}
   ]
 }
 EOF
-  validate_json_file "$out" || fail "فایل پیکربندی تولیدشده JSON معتبر نیست: $out"
+  validate_json_file "$out" || fail "generated config is not valid JSON: $out"
 }
 
 # --------------------------------------------------------------------------
@@ -281,11 +281,11 @@ apply_config() {
   if ! xray_test_config "$out"; then
     if [[ -f "$backup" ]]; then
       cp -f "$backup" "$out"
-      log_warn "پیکربندی قبلی بازگردانی شد."
+      log_warn "previous configuration restored."
     fi
     return 1
   fi
-  sysd reload-or-restart xray || log_warn "راه‌اندازی مجدد سرویس xray ناموفق بود."
+  sysd reload-or-restart xray || log_warn "failed to reload the xray service."
   return 0
 }
 
@@ -298,7 +298,7 @@ build_client_config() {
   local email uuid flow="" user_json stream_json insecure="false"
   email="${VT_EMAIL:-main}"
   uuid=$(users_get_uuid "$email")
-  [[ -n "$uuid" ]] || fail "کاربر «$email» پیدا نشد."
+  [[ -n "$uuid" ]] || fail "user '$email' not found."
   if [[ "${VT_SELF_SIGNED:-0}" == "1" ]]; then insecure="true"; fi
   case "$mode" in
     reality|tcp-tls) flow="${VT_FLOW:-xtls-rprx-vision}" ;;
@@ -370,7 +370,7 @@ build_client_config() {
   ]
 }
 EOF
-  validate_json_file "$out" || log_warn "client config JSON معتبر نیست"
+  validate_json_file "$out" || log_warn "client config is not valid JSON"
 }
 
 _client_user() {

@@ -21,43 +21,43 @@ WIZ_BLOCK_TORRENT="0"
 # Pre-flight
 # --------------------------------------------------------------------------
 preflight() {
-  log_step "بررسی اولیه سیستم"
+  log_step "system pre-flight"
 
-  is_root || fail "باید با root اجرا شود (sudo bash $0)."
+  is_root || fail "this must run as root (sudo bash $0)."
 
   if [[ -r /etc/os-release ]]; then
     local pretty
     pretty=$(. /etc/os-release && printf '%s' "${PRETTY_NAME:-unknown}")
-    log_info "سیستم‌عامل: $pretty"
+    log_info "OS: $pretty"
     if ! (. /etc/os-release && [[ "${ID:-}" == "ubuntu" || "${ID:-}" == "debian" ]]); then
-      log_warn "این اسکریپت برای Ubuntu/Debian نوشته شده؛ ممکن است نیاز به تنظیم دستی داشته باشد."
+      log_warn "this script targets Ubuntu/Debian; other distributions may need manual tweaks."
     fi
   fi
-  log_info "معماری: $(uname -m) → بسته Xray-linux-$(xray_arch)"
-  log_info "هسته: $(uname -r)"
+  log_info "architecture: $(uname -m) -> package Xray-linux-$(xray_arch)"
+  log_info "kernel: $(uname -r)"
 
   local local_ip pub_ip
   local_ip=$(local_primary_ipv4); local_ip="${local_ip:-127.0.0.1}"
   pub_ip=$(detect_public_ipv4) || pub_ip=""
   if [[ -z "$pub_ip" ]]; then
-    log_warn "آی‌پی عمومی تشخیص داده نشد؛ از آی‌پی محلی استفاده می‌شود."
+    log_warn "could not detect the public IP; falling back to the local address."
     pub_ip="$local_ip"
   fi
-  log_info "آی‌پی محلی: $local_ip"
-  log_info "آی‌پی عمومی: $pub_ip"
+  log_info "local IP:  $local_ip"
+  log_info "public IP: $pub_ip"
   if [[ -n "$local_ip" && "$local_ip" != "$pub_ip" && "$local_ip" != "127.0.0.1" ]]; then
-    log_note "سرور پشت NAT است (آی‌پی محلی ≠ عمومی). برای اتصال از آی‌پی عمومی استفاده کنید."
+    log_note "this server sits behind NAT (local IP != public IP). Connect using the public IP."
   fi
   VT_DETECTED_IP="$pub_ip"
   VT_DETECTED_IPV6="$(detect_public_ipv6 || true)"
   VT_SSH_PORT="$(detect_ssh_port)"
-  log_info "پورت SSH: $VT_SSH_PORT"
+  log_info "SSH port: $VT_SSH_PORT"
 
   if [[ -f "$(p "$R_XRAY_CONF")" && "$VT_FORCE" != "1" ]]; then
-    if confirm "یک نصب موجود پیدا شد. پیکربندی فعلی بازنویسی شود؟" n; then
+    if confirm "an existing installation was found. Overwrite the current config?" n; then
       VT_FORCE=1
     else
-      die "لغو شد."
+      die "cancelled."
     fi
   fi
 }
@@ -68,11 +68,12 @@ preflight() {
 wizard_ask_domain() {
   cat <<'TXT'
 
-  ── گام ۱: دامنه ────────────────────────────────────────────────────────
-  اگر دامنه دارید، می‌توانیم گواهی SSL رایگان و معتبر Let's Encrypt بگیریم
-  و تونل دقیقاً مثل یک سایت HTTPS واقعی دیده شود (پنهان‌سازی بهتر).
-  اگر دامنه ندارید هم مشکلی نیست: حالت REALITY بدون دامنه و بدون گواهی
-  کار می‌کند، و برای آی‌پی هم می‌توان گواهی معتبر Let's Encrypt گرفت.
+  ── step 1: domain ──────────────────────────────────────────────────────
+  With a domain we can get a free, trusted Let's Encrypt certificate and
+  the tunnel will look exactly like an ordinary HTTPS site (better
+  camouflage).
+  Without a domain you are still fine: REALITY works with no domain and no
+  certificate, and Let's Encrypt can also issue a certificate for a bare IP.
   ───────────────────────────────────────────────────────────────────────
 TXT
   local has_domain="n"
@@ -81,31 +82,31 @@ TXT
   elif [[ "$VT_ASSUME_YES" == "1" ]]; then
     has_domain="n"
   else
-    if confirm "دامنه دارید و به این سرور اشاره می‌کند؟" n; then has_domain="y"; fi
+    if confirm "do you have a domain that points at this server?" n; then has_domain="y"; fi
   fi
 
   if [[ "$has_domain" == "y" ]]; then
     local domain="$WIZ_DOMAIN"
     if [[ -z "$domain" ]]; then
-      ask domain "نام دامنه (مثلاً tunnel.example.com)" ""
+      ask domain "domain name (e.g. tunnel.example.com)" ""
     fi
     domain="${domain,,}"; domain="${domain#*.}"; domain="${domain%.}"
     while ! is_valid_domain "$domain"; do
-      log_err "«$domain» یک دامنه معتبر نیست."
-      ask domain "نام دامنه" ""
+      log_err "'$domain' is not a valid domain name."
+      ask domain "domain name" ""
       domain="${domain,,}"
     done
 
-    log_info "بررسی رکورد DNS برای $domain ..."
+    log_info "checking the DNS record for $domain ..."
     local res; res=$(check_domain_points_here "$domain") || true
     case "$res" in
-      ok)       log_ok "DNS درست است و به همین سرور اشاره می‌کند." ;;
+      ok)       log_ok "DNS is correct and points at this server." ;;
       nodns)
-        log_warn "رکورد A برای $domain پیدا نشد."
-        log_note "اگر از Cloudflare/... استفاده می‌کنید می‌توانیم با روش DNS گواهی بگیریم."
+        log_warn "no A record found for $domain."
+        log_note "if the domain is on Cloudflare (or similar) we can validate over the DNS API instead."
         ;;
       mismatch:*)
-        log_warn "دامنه به ${res#mismatch:} اشاره می‌کند، نه به این سرور (${VT_DETECTED_IP})."
+        log_warn "the domain points at ${res#mismatch:}, not at this server (${VT_DETECTED_IP})."
         ;;
     esac
     WIZ_DOMAIN="$domain"
@@ -120,12 +121,12 @@ TXT
 wizard_ask_mode() {
   cat <<'TXT'
 
-  ── گام ۲: نوع اتصال و گواهی SSL ───────────────────────────────────────
-   1) REALITY  — بدون دامنه، بدون گواهی، روی آی‌پی کار می‌کند.
-                 ترافیک شبیه یک سایت HTTPS واقعی است. (پیشنهاد ما)
-   2) WebSocket + TLS روی پورت 443 — شبیه‌ترین حالت به وب‌سایت معمولی؛
-                 نیاز به گواهی SSL دارد (دامنه یا گواهی مخصوص آی‌پی).
-   3) TCP + TLS روی پورت دلخواه — نیاز به گواهی SSL دارد.
+  ── step 2: transport and TLS certificate ───────────────────────────────
+   1) REALITY  - no domain, no certificate, works on a bare IP. The traffic
+                 looks like a real HTTPS site. (recommended)
+   2) WebSocket + TLS on port 443 - closest to an ordinary website; needs a
+                 TLS certificate (domain, or an IP-address certificate).
+   3) TCP + TLS on a custom port - needs a TLS certificate.
   ───────────────────────────────────────────────────────────────────────
 TXT
   local def=1
@@ -135,10 +136,10 @@ TXT
     esac
   fi
   local idx
-  menu_pick idx "حالت تونل را انتخاب کنید:" \
-    "REALITY (بدون گواهی — پیشنهادی)" \
-    "WebSocket + TLS (پورت 443)" \
-    "TCP + TLS (پورت دلخواه)"
+  menu_pick idx "choose the tunnel mode:" \
+    "REALITY (no certificate - recommended)" \
+    "WebSocket + TLS (port 443)" \
+    "TCP + TLS (custom port)"
   if [[ -n "$WIZ_MODE" ]]; then idx="$def"; fi
 
   case "$idx" in
@@ -146,7 +147,7 @@ TXT
     2) VT_MODE="ws-tls";  VT_FLOW="" ;;
     3) VT_MODE="tcp-tls"; VT_FLOW="xtls-rprx-vision" ;;
   esac
-  log_ok "حالت انتخاب‌شده: ${VT_MODE}"
+  log_ok "selected mode: ${VT_MODE}"
 
   if [[ "$VT_MODE" == "reality" ]]; then
     VT_CERT_MODE="none"
@@ -161,26 +162,26 @@ TXT
 wizard_ask_reality_target() {
   cat <<'TXT'
 
-  REALITY ترافیک شما را پشت دست‌دادن TLS با یک سایت واقعی پنهان می‌کند.
-  سایت انتخابی باید TLS 1.3 پشتیبانی کند و در منطقه شما فیلتر نباشد.
+  REALITY hides your traffic inside a TLS handshake with a real website.
+  The site must support TLS 1.3 and must not be blocked in your region.
 TXT
   local def="www.microsoft.com"
   if [[ -n "$WIZ_SNI" ]]; then def="$WIZ_SNI"; fi
-  ask WIZ_SNI "دامنه‌ی استتار (SNI)" "$def"
+  ask WIZ_SNI "camouflage domain (SNI)" "$def"
   WIZ_SNI="${WIZ_SNI,,}"
   WIZ_SNI="${WIZ_SNI#https://}"; WIZ_SNI="${WIZ_SNI#http://}"; WIZ_SNI="${WIZ_SNI%%/*}"
 
-  log_info "بررسی $WIZ_SNI ..."
+  log_info "checking $WIZ_SNI ..."
   local res; res=$(check_reality_target "$WIZ_SNI" 443) || true
   case "$res" in
-    ok) log_ok "$WIZ_SNI برای REALITY مناسب است (TLS 1.3 ✓)" ;;
-    offline)    log_note "حالت آفلاین: بررسی سایت استتار رد شد." ;;
-    no-openssl) log_warn "openssl نیست، بررسی انجام نشد." ;;
+    ok)         log_ok "$WIZ_SNI is suitable for REALITY (TLS 1.3 ok)" ;;
+    offline)    log_note "offline mode: skipping the camouflage-site check." ;;
+    no-openssl) log_warn "openssl is missing, so the check was skipped." ;;
     *)
-      log_warn "$WIZ_SNI مناسب به نظر نمی‌رسد (${res})."
-      if confirm "با این حال از همین استفاده شود؟" n; then :
+      log_warn "$WIZ_SNI does not look suitable (${res})."
+      if confirm "use it anyway?" n; then :
       else
-        ask WIZ_SNI "دامنه‌ی استتار" "www.apple.com"
+        ask WIZ_SNI "camouflage domain" "www.apple.com"
         WIZ_SNI="${WIZ_SNI,,}"
       fi
       ;;
@@ -200,24 +201,24 @@ wizard_ask_cert() {
   else
     cat <<'TXT'
 
-  ── گواهی SSL برای آی‌پی ───────────────────────────────────────────────
-   1) Let's Encrypt مخصوص آی‌پی — گواهی معتبر و رایگان، بدون دامنه.
-      از ژانویه ۲۰۲۶ در دسترس عموم است؛ اعتبارش ~۶ روز است و هر ۳ روز
-      خودکار تمدید می‌شود. نیاز دارد پورت 80 باز باشد.
-   2) گواهی خودامضا — بدون نیاز به پورت 80، ولی کلاینت باید
-      allowInsecure را فعال کند.
+  ── TLS certificate for an IP address ───────────────────────────────────
+   1) Let's Encrypt IP certificate - free and trusted, no domain needed.
+      Generally available since January 2026; valid for ~6 days and renewed
+      automatically every 3 days. Requires port 80 to be open.
+   2) Self-signed - needs no open port 80, but clients must enable
+      allowInsecure.
   ───────────────────────────────────────────────────────────────────────
 TXT
     local cidx
-    menu_pick cidx "کدام گواهی؟" \
-      "Let's Encrypt برای آی‌پی (معتبر، تمدید خودکار)" \
-      "خودامضا (ساده، بدون پورت 80)"
+    menu_pick cidx "which certificate?" \
+      "Let's Encrypt for the IP (trusted, auto-renewing)" \
+      "self-signed (simple, no port 80 needed)"
     case "$cidx" in
       1) cert="letsencrypt-ip" ;;
       2) cert="selfsigned" ;;
     esac
   fi
-  [[ "$VT_ASSUME_YES" == "1" && -z "$cert" ]] && cert="selfsigned"
+  if [[ "$VT_ASSUME_YES" == "1" && -z "$cert" ]]; then cert="selfsigned"; fi
 
   VT_CERT_MODE="$cert"
   VT_HOST="${WIZ_DOMAIN:-${VT_DETECTED_IP}}"
@@ -229,7 +230,7 @@ TXT
     VT_REJECT_UNKNOWN_SNI="1"
   fi
   if [[ "$cert" == "selfsigned" ]]; then VT_SELF_SIGNED="1"; else VT_SELF_SIGNED="0"; fi
-  log_ok "منبع گواهی: $cert   میزبان: $VT_HOST"
+  log_ok "certificate source: $cert   host: $VT_HOST"
 
   if [[ "$cert" == "letsencrypt-domain" ]]; then
     wizard_ask_acme_method
@@ -239,12 +240,14 @@ TXT
 wizard_ask_acme_method() {
   cat <<'TXT'
 
-  روش تأیید مالکیت دامنه:
-   1) Standalone — اسکریپت خودش موقتاً پورت 80 را باز می‌کند.
-                   ساده‌ترین حالت؛ پورت 80 باید آزاد و باز باشد.
-   2) Webroot    — فایل تأیید داخل پوشه یک وب‌سرور در حال اجرا گذاشته می‌شود.
-   3) DNS        — از طریق API سرویس DNS (مثل Cloudflare). پورت 80 لازم نیست
-                   و حتی اگر دامنه هنوز به این سرور اشاره نکند کار می‌کند.
+  how should domain ownership be validated?
+   1) Standalone - the script binds port 80 itself, briefly. Simplest, but
+                   port 80 must be free and reachable.
+   2) Webroot    - the challenge file is written into a running web server's
+                   document root.
+   3) DNS        - validated through a DNS provider API (e.g. Cloudflare).
+                   Needs no open port and works even before the domain
+                   points at this server.
   ───────────────────────────────────────────────────────────────────────
 TXT
   local midx=1
@@ -252,22 +255,22 @@ TXT
     standalone) midx=1 ;; webroot) midx=2 ;; dns) midx=3 ;;
   esac
   if [[ -z "$WIZ_ACME_METHOD" && "$VT_ASSUME_YES" != "1" ]]; then
-    menu_pick midx "کدام روش؟" "Standalone (پورت 80)" "Webroot" "DNS API"
+    menu_pick midx "which method?" "Standalone (port 80)" "Webroot" "DNS API"
   fi
   case "$midx" in
     1) WIZ_ACME_METHOD="standalone" ;;
     2) WIZ_ACME_METHOD="webroot"
-       ask WIZ_WEBROOT "مسیر webroot" "/var/www/html" ;;
+       ask WIZ_WEBROOT "webroot path" "/var/www/html" ;;
     3) WIZ_ACME_METHOD="dns"
-       ask WIZ_DNS_PROVIDER "نام پلاگین acme.sh" "dns_cf"
+       ask WIZ_DNS_PROVIDER "acme.sh plugin name" "dns_cf"
        case "$WIZ_DNS_PROVIDER" in
-         dns_cf) ask_secret WIZ_DNS_TOKEN "توکن Cloudflare (CF_Token)" ;;
-         *) ask WIZ_DNS_ENV "نام متغیر محیطی موردنیاز پلاگین" "CF_Token"
-            ask_secret WIZ_DNS_TOKEN "مقدار متغیر" ;;
+         dns_cf) ask_secret WIZ_DNS_TOKEN "Cloudflare token (CF_Token)" ;;
+         *) ask WIZ_DNS_ENV "environment variable the plugin expects" "CF_Token"
+            ask_secret WIZ_DNS_TOKEN "value" ;;
        esac
        ;;
   esac
-  log_ok "روش صدور گواهی: $WIZ_ACME_METHOD"
+  log_ok "certificate method: $WIZ_ACME_METHOD"
 }
 
 # --------------------------------------------------------------------------
@@ -284,20 +287,20 @@ wizard_ask_port() {
     if [[ "$VT_ASSUME_YES" == "1" ]]; then
       ans="$def"
     else
-      ask ans "پورت تونل (عدد یا random)" "$def"
+      ask ans "tunnel port (a number, or random)" "$def"
     fi
   fi
-  if [[ "$ans" == "random" || "$ans" == "رندم" ]]; then
+  if [[ "$ans" == "random" ]]; then
     VT_PORT="$(random_port "${VT_API_PORT:-}" 80 443 "$VT_SSH_PORT")"
-    log_ok "پورت تصادفی انتخاب شد: ${VT_PORT}"
+    log_ok "random port selected: ${VT_PORT}"
   elif [[ "$ans" =~ ^[0-9]+$ ]] && (( ans >= 1 && ans <= 65535 )); then
     VT_PORT="$ans"
     if port_in_use "$VT_PORT"; then
-      log_warn "پورت $VT_PORT در حال استفاده است؛ یک پورت تصادفی انتخاب می‌شود."
+      log_warn "port $VT_PORT is already in use; picking a random one instead."
       VT_PORT="$(random_port "${VT_API_PORT:-}" 80 443 "$VT_SSH_PORT")"
     fi
   else
-    log_warn "«$ans» پورت معتبری نیست؛ پورت تصادفی انتخاب می‌شود."
+    log_warn "'$ans' is not a valid port; picking a random one instead."
     VT_PORT="$(random_port "${VT_API_PORT:-}" 80 443 "$VT_SSH_PORT")"
   fi
 
@@ -306,7 +309,7 @@ wizard_ask_port() {
 
   if [[ "$VT_MODE" == "ws-tls" ]]; then
     VT_WS_PATH="/$(rand_hex 16)/"
-    log_ok "مسیر WebSocket: ${VT_WS_PATH}"
+    log_ok "WebSocket path: ${VT_WS_PATH}"
   else
     VT_WS_PATH=""
   fi
@@ -319,11 +322,11 @@ wizard_ask_email() {
   if [[ -n "$WIZ_EMAIL" ]]; then
     VT_EMAIL="$WIZ_EMAIL"
   else
-    ask VT_EMAIL "نام کاربر اول" "main"
+    ask VT_EMAIL "name of the first user" "main"
   fi
   VT_EMAIL="${VT_EMAIL//[^a-zA-Z0-9._-]/}"
-  [[ -n "$VT_EMAIL" ]] || VT_EMAIL="main"
-  log_ok "کاربر اول: $VT_EMAIL"
+  if [[ -z "$VT_EMAIL" ]]; then VT_EMAIL="main"; fi
+  log_ok "first user: $VT_EMAIL"
 }
 
 # --------------------------------------------------------------------------
@@ -335,7 +338,7 @@ wizard_ask_extras() {
   elif [[ "$VT_ASSUME_YES" == "1" ]]; then
     VT_FIREWALL="no"
   else
-    if confirm "فایروال UFW فعال و فقط پورت‌های لازم باز شود؟ (SSH=${VT_SSH_PORT})" y; then
+    if confirm "enable the UFW firewall and open only the required ports? (SSH=${VT_SSH_PORT})" y; then
       VT_FIREWALL="yes"
     else
       VT_FIREWALL="no"
@@ -343,12 +346,12 @@ wizard_ask_extras() {
   fi
 
   if [[ "$VT_ASSUME_YES" != "1" ]]; then
-    if confirm "تبلیغات و ردیاب‌ها مسدود شود؟ (نیاز به دانلود geosite)" n; then
+    if confirm "block ads and trackers? (downloads the geosite database)" n; then
       VT_AD_BLOCK="1"
     else
       VT_AD_BLOCK="0"
     fi
-    if confirm "ترافیک BitTorrent/دانلود سنگین مسدود شود؟" n; then
+    if confirm "block BitTorrent / heavy download traffic?" n; then
       VT_BLOCK_TORRENT="1"
     else
       VT_BLOCK_TORRENT="0"
@@ -377,9 +380,9 @@ do_install() {
   wizard_ask_email
   wizard_ask_extras
 
-  log_step "نصب Xray-core"
+  log_step "installing Xray-core"
   if [[ "$VT_SKIP_DOWNLOADS" == "1" ]]; then
-    log_note "[dry] دانلود Xray رد شد."
+    log_note "[dry] skipping the Xray download."
     mkdir -p "$(p "$(dirname "$R_XRAY_BIN")")" "$(p "$R_XRAY_ASSETS")"
     if [[ ! -e "$(p "$R_XRAY_BIN")" ]]; then
       cat >"$(p "$R_XRAY_BIN")" <<'STUB'
@@ -400,17 +403,17 @@ STUB
     download_and_install_xray
   fi
 
-  log_step "ساخت کلیدها"
+  log_step "generating keys"
   users_init
-  users_add "$VT_EMAIL" "$(gen_uuid)" "$VT_EMAIL" || log_note "کاربر از قبل ثبت شده بود."
+  users_add "$VT_EMAIL" "$(gen_uuid)" "$VT_EMAIL" || log_note "the user was already registered."
 
   case "$VT_MODE" in
     reality)
-      gen_x25519 || fail "ساخت کلید X25519 ناموفق بود."
+      gen_x25519 || fail "failed to generate the X25519 key."
       VT_REALITY_PRIVATE="$X25519_PRIVATE"
       VT_REALITY_PUBLIC="$X25519_PUBLIC"
       VT_REALITY_SHORTID="$(rand_hex 16)"
-      log_ok "کلید REALITY ساخته شد."
+      log_ok "REALITY key generated."
       ;;
     ws-tls|tcp-tls)
       VT_REALITY_PRIVATE=""; VT_REALITY_PUBLIC=""; VT_REALITY_SHORTID=""
@@ -419,42 +422,42 @@ STUB
   esac
 
   if [[ "$VT_AD_BLOCK" == "1" ]]; then
-    log_step "دریافت پایگاه‌داده مسدودسازی تبلیغات"
+    log_step "downloading the ad-blocking database"
     if [[ "$VT_SKIP_DOWNLOADS" == "1" ]]; then
-      log_note "[dry] geo assets رد شد."
+      log_note "[dry] skipping the geo assets."
       VT_AD_BLOCK="0"
     elif download_geo_assets; then
-      log_ok "geosite/geoip دریافت شد."
+      log_ok "geosite/geoip downloaded."
     else
-      log_warn "دریافت ناموفق بود — مسدودسازی تبلیغات غیرفعال می‌ماند."
+      log_warn "download failed - ad blocking stays disabled."
       VT_AD_BLOCK="0"
     fi
   fi
 
-  log_step "نوشتن پیکربندی"
+  log_step "writing the configuration"
   sysprep_dirs
   build_xray_config "$VT_MODE" "$(p "$R_XRAY_CONF")"
   chmod 600 "$(p "$R_XRAY_CONF")"
-  log_ok "پیکربندی نوشته شد: $R_XRAY_CONF"
-  xray_test_config "$(p "$R_XRAY_CONF")" || fail "پیکربندی Xray نامعتبر است."
+  log_ok "configuration written: $R_XRAY_CONF"
+  xray_test_config "$(p "$R_XRAY_CONF")" || fail "the Xray configuration is invalid."
 
-  log_step "ساخت سرویس همیشه‌فعال"
+  log_step "creating the always-on service"
   write_xray_unit
   write_health_units
   write_cert_timer_units
 
-  log_step "ذخیره وضعیت نصب"
+  log_step "saving the install state"
   VT_INSTALLED_AT="$(date -Is)"
   VT_XRAY_VERSION="$(xray_installed_version 2>/dev/null || echo unknown)"
   VT_PUBLIC_IP="$VT_DETECTED_IP"
   VT_PUBLIC_IPV6="${VT_DETECTED_IPV6:-}"
   VT_SSH_PORT="${VT_SSH_PORT:-22}"
-  state_save || fail "ذخیره وضعیت نصب ناموفق بود."
+  state_save || fail "failed to save the install state."
 
   enable_services
 
   if [[ "$VT_FIREWALL" == "yes" ]]; then
-    log_step "تنظیم فایروال"
+    log_step "configuring the firewall"
     local -a extra=()
     if [[ "${VT_CERT_MODE:-}" == "letsencrypt-ip" || "$WIZ_ACME_METHOD" == "standalone" ]]; then
       extra+=(80)
@@ -465,17 +468,17 @@ STUB
   # Make sure the tunnel really came up before we hand over the config.
   sleep 2
   if xray_is_active; then
-    log_ok "تونل در حال اجراست."
+    log_ok "the tunnel is running."
   else
-    log_warn "سرویس فعال نشد — با «vt logs» لاگ را ببینید."
+    log_warn "the service did not come up - check the log with: vt logs"
   fi
 
   write_client_config "$VT_EMAIL" "$(p "$R_ETC")/client.json" >/dev/null || true
 
   # vt-health.timer and vt-cert-renew.timer call /opt/vt/vt, so the program
   # must actually live there.
-  log_step "نصب خودِ برنامه در $R_INSTALL_DIR"
-  cmd_self_install || log_warn "کپی برنامه به $R_INSTALL_DIR ناموفق بود؛ تایمرها کار نخواهند کرد."
+  log_step "installing the program itself into $R_INSTALL_DIR"
+  cmd_self_install || log_warn "copying the program to $R_INSTALL_DIR failed; the timers will not work."
 
   printf '%s === install finished ===\n' "$(_ts)" >>"$logfile"
   print_full_config yes
@@ -483,7 +486,7 @@ STUB
 
 # Certificate acquisition for the TLS modes.
 obtain_certificate() {
-  log_step "تهیه گواهی SSL رایگان"
+  log_step "obtaining a free TLS certificate"
   if [[ "$VT_CERT_MODE" == letsencrypt-* ]]; then
     ask_acme_email
   fi
@@ -496,25 +499,25 @@ obtain_certificate() {
         dns)        cert_issue_domain "$VT_HOST" "$VT_ACME_EMAIL" dns \
                       "$WIZ_DNS_PROVIDER" "${WIZ_DNS_ENV:-CF_Token}" "$WIZ_DNS_TOKEN" ;;
       esac || {
-        log_warn "صدور گواهی ناموفق بود."
-        if confirm "به‌جایش گواهی خودامضا بسازیم؟ (کلاینت باید allowInsecure بزند)" y; then
+        log_warn "certificate issuance failed."
+        if confirm "create a self-signed certificate instead? (clients must set allowInsecure)" y; then
           cert_issue_selfsigned "$VT_HOST" 825
           VT_CERT_MODE="selfsigned"; VT_SELF_SIGNED="1"; VT_REJECT_UNKNOWN_SNI="0"
         else
-          fail "بدون گواهی نمی‌توان ادامه داد."
+          fail "cannot continue without a certificate."
         fi
       }
       ;;
     letsencrypt-ip)
       install_pkgs socat
       if ! cert_issue_ip "$VT_HOST" "$VT_ACME_EMAIL"; then
-        log_warn "گواهی Let's Encrypt برای آی‌پی صادر نشد (ممکن است حساب شما هنوز"
-        log_warn "مجاز به گواهی آی‌پی نباشد یا پورت 80 بسته باشد)."
-        if confirm "به‌جایش گواهی خودامضا بسازیم؟" y; then
+        log_warn "Let's Encrypt did not issue a certificate for the IP address"
+        log_warn "(port 80 may be closed, or the account may not be eligible yet)."
+        if confirm "create a self-signed certificate instead?" y; then
           cert_issue_selfsigned "$VT_HOST" 825
           VT_CERT_MODE="selfsigned"; VT_SELF_SIGNED="1"
         else
-          fail "بدون گواهی نمی‌توان ادامه داد."
+          fail "cannot continue without a certificate."
         fi
       fi
       ;;
@@ -522,7 +525,7 @@ obtain_certificate() {
       cert_issue_selfsigned "$VT_HOST" 825
       ;;
     none) : ;;
-    *) fail "حالت گواهی نامعتبر: $VT_CERT_MODE" ;;
+    *) fail "invalid certificate mode: $VT_CERT_MODE" ;;
   esac
 }
 
@@ -533,8 +536,8 @@ ask_acme_email() {
   if [[ "$VT_ASSUME_YES" == "1" ]]; then
     e="admin@${VT_HOST:-localhost}"
   else
-    ask e "ایمیل برای ثبت‌نام Let's Encrypt (اختیاری)" "admin@${VT_HOST:-localhost}"
+    ask e "e-mail for the Let's Encrypt account (optional)" "admin@${VT_HOST:-localhost}"
   fi
-  [[ "$e" == *@*.* ]] || e="admin@${VT_HOST:-localhost}"
+  if [[ "$e" != *@*.* ]]; then e="admin@${VT_HOST:-localhost}"; fi
   VT_ACME_EMAIL="$e"
 }

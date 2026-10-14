@@ -6,7 +6,7 @@ share_link() {
   local email="${1:-${VT_EMAIL:-main}}"
   local uuid remark host port mode
   uuid=$(users_get_uuid "$email")
-  [[ -n "$uuid" ]] || { log_err "کاربر «$email» پیدا نشد."; return 1; }
+  [[ -n "$uuid" ]] || { log_err "user '$email' not found."; return 1; }
   remark=$(jq -r --arg e "$email" '.users[] | select(.email==$e) | (.remark // .email)' \
             "$(users_file)" 2>/dev/null)
   [[ -n "$remark" && "$remark" != "null" ]] || remark="$email"
@@ -33,7 +33,7 @@ share_link() {
       q+=("alpn=http%2F1.1" "fp=chrome" "encryption=none")
       if [[ "${VT_SELF_SIGNED:-0}" == "1" ]]; then q+=("allowInsecure=1"); fi
       ;;
-    *) log_err "حالت ناشناخته: $mode"; return 1 ;;
+    *) log_err "unknown mode: $mode"; return 1 ;;
   esac
 
   local qs=""
@@ -47,21 +47,21 @@ share_link() {
 print_qr() {
   local text="$1"
   if ! have qrencode; then
-    log_note "qrencode نصب نیست — کد QR نمایش داده نمی‌شود (apt-get install qrencode)."
+    log_note "qrencode is not installed - no QR code (apt-get install qrencode)."
     return 0
   fi
   printf '\n'
   qrencode -t ANSIUTF8 -m 1 "$text" 2>/dev/null \
     || qrencode -t UTF8 "$text" 2>/dev/null \
-    || { log_note "نمایش QR ناموفق بود."; return 0; }
+    || { log_note "could not render the QR code."; return 0; }
 }
 
 # One-line summary per user, for `vt users list`.
 print_users_table() {
   local f; f=$(users_file)
-  [[ -f "$f" ]] || { log_warn "هیچ کاربری ثبت نشده."; return; }
+  [[ -f "$f" ]] || { log_warn "no users registered."; return; }
   local email uuid remark created
-  printf '\n%s\n' "${C_BOLD}  کاربر            UUID                                    ساخت${C_RESET}"
+  printf '\n%s\n' "${C_BOLD}  user              UUID                                    created${C_RESET}"
   printf '  %s\n' "────────────────────────────────────────────────────────────────────────"
   while IFS='|' read -r email uuid remark created; do
     [[ -z "$email" ]] && continue
@@ -80,9 +80,9 @@ print_full_config() {
   link=$(share_link "$email") || return 1
 
   local -a lines=()
-  lines+=("پروتکل        : VLESS (${mode})")
-  lines+=("آدرس سرور     : ${host}")
-  lines+=("پورت          : ${port}")
+  lines+=("protocol      : VLESS (${mode})")
+  lines+=("server        : ${host}")
+  lines+=("port          : ${port}")
   lines+=("UUID          : $(users_get_uuid "$email")")
   case "$mode" in
     reality)
@@ -98,21 +98,21 @@ print_full_config() {
       lines+=("Flow          : ${VT_FLOW:-—}")
       lines+=("SNI           : ${host}")
       if [[ "${VT_SELF_SIGNED:-0}" == "1" ]]; then
-        lines+=("گواهی         : خودامضا → allowInsecure لازم است")
+        lines+=("certificate   : self-signed -> allowInsecure required")
       else
-        lines+=("گواهی         : Let's Encrypt (تمدید خودکار)")
+        lines+=("certificate   : Let's Encrypt (auto-renewing)")
       fi
       ;;
   esac
   lines+=(" ")
-  lines+=("لینک اشتراک:")
+  lines+=("share link:")
   lines+=("  ${link}")
 
-  box "کانفیگ اتصال (${email})" "${lines[@]}"
+  box "connection config (${email})" "${lines[@]}"
 
   local out; out=$(p "$R_ETC/config.txt")
   {
-    printf '%s\n' "${lines[@]#"  "}" | sed 's/^لینک اشتراک:/لینک اشتراک:/'
+    printf '%s\n' "${lines[@]#  }"
     printf '\n'
   } >"$out" 2>/dev/null || true
   chmod 600 "$out" 2>/dev/null || true
@@ -123,14 +123,14 @@ print_full_config() {
 
   cat <<'HINT'
 
-  ── چطور «تمام» ترافیک سیستم را از این سرور عبور دهیم؟ ──────────────────
-   موبایل   : v2rayNG / Happ / Streisand → لینک بالا را وارد کنید و حالت
-              «TUN» یا «Global / تمام ترافیک» را فعال کنید.
-   ویندوز   : v2rayN → Import from clipboard → Routing را روی
-              «Global» بگذارید و «Set system proxy» را بزنید.
-   macOS    : Streisand یا V2Box → لینک را اضافه کنید → Set as system proxy.
-   لینوکس   : فایل client.json ساخته‌شده را با xray/v2ray اجرا کنید و
-              پروکسی سیستم را روی 127.0.0.1:10808 تنظیم کنید.
+  ── how to route ALL of your traffic through this server ───────────────
+   Android  : v2rayNG / Happ / Streisand -> add the link above, then enable
+              "TUN" mode or "Global / all traffic" routing.
+   Windows  : v2rayN -> Import from clipboard -> set routing to "Global"
+              and press "Set system proxy".
+   macOS/iOS: Streisand or V2Box -> add the link -> Set as system proxy.
+   Linux    : run the generated client.json with xray/v2ray and point the
+              system proxy at 127.0.0.1:10808 (SOCKS) or :10809 (HTTP).
   ───────────────────────────────────────────────────────────────────────
 HINT
 }
@@ -146,6 +146,6 @@ write_client_config() {
   build_client_config "$out"
   VT_EMAIL="$prev"
   chmod 600 "$out"
-  log_ok "کانفیگ کلاینت نوشته شد: $out"
+  log_ok "client config written: $out"
   printf '%s\n' "$out"
 }

@@ -88,7 +88,7 @@ users_add() {
   users_init
   f=$(users_file)
   if users_exists "$email"; then
-    log_warn "کاربر «$email» از قبل وجود دارد."
+    log_warn "user '$email' already exists."
     return 1
   fi
   local tmp; tmp=$(mktemp)

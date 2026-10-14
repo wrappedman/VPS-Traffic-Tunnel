@@ -172,6 +172,6 @@ check_reality_target() {
 # user confirm the cloud firewall.
 warn_about_cloud_firewall() {
   local port="$1"
-  log_warn "اگر از پنل ابری (Hetzner/AWS/DigitalOcean/Arvan/...) استفاده می‌کنید،"
-  log_warn "باید پورت ${port} را در فایروال پنل هم باز کنید."
+  log_warn "if your provider has a cloud firewall (Hetzner/AWS/DigitalOcean/Arvan/...),"
+  log_warn "you must also open port ${port} there."
 }

@@ -100,7 +100,7 @@ is_root() { [[ "$(id -u)" -eq 0 ]]; }
 
 require_root() {
   if ! is_root; then
-    die "این اسکریپت باید با root اجرا شود. (Run with: sudo $0 $*)"
+    die "this script must run as root. (Run with: sudo $0 $*)"
   fi
 }
 
@@ -138,8 +138,8 @@ confirm() {
   IFS= read -r __ans || __ans=""
   __ans="${__ans,,}"
   case "$__ans" in
-    y|yes|بله) return 0 ;;
-    n|no|نه)   return 1 ;;
+    y|yes) return 0 ;;
+    n|no)  return 1 ;;
     *)         [[ "$__def" == "y" ]] ;;   # empty / unrecognised -> the default
   esac
 }
@@ -180,7 +180,7 @@ menu_pick() {
     printf -v "$__var" '%s' "$__def"
     return 0
   fi
-  printf '%s' "${C_BOLD}انتخاب${C_RESET} [${C_GREEN}${__def}${C_RESET}]: "
+  printf '%s' "${C_BOLD}Choose${C_RESET} [${C_GREEN}${__def}${C_RESET}]: "
   IFS= read -r __ans || __ans=""
   if [[ -z "$__ans" ]]; then __ans="$__def"; fi
   if ! [[ "$__ans" =~ ^[0-9]+$ ]] || (( __ans < 1 || __ans > ${#opts[@]} )); then
@@ -235,7 +235,7 @@ random_port() {
     fi
     tries=$((tries + 1))
   done
-  fail "نتوانستم پورت آزاد پیدا کنم (could not find a free port)"
+  fail "could not find a free port"
 }
 
 port_in_use() {
@@ -281,13 +281,13 @@ install_pkgs() {
     return 0
   fi
   if ! have apt-get; then
-    log_warn "apt-get پیدا نشد — لطفاً دستی نصب کنید: ${missing[*]}"
+    log_warn "apt-get not found - please install manually: ${missing[*]}"
     return 1
   fi
   apt_update_once
-  log_info "نصب بسته‌ها: ${missing[*]}"
+  log_info "installing packages: ${missing[*]}"
   DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "${missing[@]}" \
-    || fail "نصب بسته‌های ${missing[*]} ناموفق بود"
+    || fail "failed to install packages: ${missing[*]}"
 }
 
 # --------------------------------------------------------------------------
@@ -314,7 +314,7 @@ box() {
 
 pause() {
   if [[ "$VT_ASSUME_YES" == "1" ]]; then return 0; fi
-  printf '\n%s' "${C_DIM}برای ادامه Enter بزنید...${C_RESET}"
+  printf '\n%s' "${C_DIM}press Enter to continue...${C_RESET}"
   IFS= read -r _ || true
   printf '\n'
 }

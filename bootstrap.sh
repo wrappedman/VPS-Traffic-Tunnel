@@ -15,29 +15,29 @@ DEST="/opt/vt"
 TARBALL_URL="https://codeload.github.com/${REPO_OWNER}/${REPO_NAME}/tar.gz/refs/heads/${BRANCH}"
 
 if [[ "$(id -u)" -ne 0 ]]; then
-  echo "این اسکریپت باید با root اجرا شود:  curl -fsSL <url> | sudo bash" >&2
+  echo "this script must run as root:  curl -fsSL <url> | sudo bash" >&2
   exit 1
 fi
 
-echo "==> دریافت ${REPO_NAME} ..."
+echo "==> fetching ${REPO_NAME} ..."
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
 if ! curl -fsSL --connect-timeout 15 --max-time 180 -o "$TMP/repo.tgz" "$TARBALL_URL"; then
-  echo "دانلود از GitHub ناموفق بود. اگر دسترسی مستقیم ندارید، دستی کلون کنید:" >&2
+  echo "downloading from GitHub failed. If you have no direct access, clone it manually:" >&2
   echo "  git clone https://github.com/${REPO_OWNER}/${REPO_NAME}.git && cd ${REPO_NAME} && sudo ./vt self-install" >&2
   exit 1
 fi
 
 mkdir -p "$DEST"
-tar xzf "$TMP/repo.tgz" -C "$TMP" || { echo "استخراج ناموفق بود." >&2; exit 1; }
+tar xzf "$TMP/repo.tgz" -C "$TMP" || { echo "extraction failed." >&2; exit 1; }
 SRC=$(find "$TMP" -maxdepth 1 -type d -name "${REPO_NAME}-*" | head -n1)
-[[ -n "$SRC" && -x "$SRC/vt" ]] || { echo "ساختار آرشیو غیرمنتظره بود." >&2; exit 1; }
+[[ -n "$SRC" && -x "$SRC/vt" ]] || { echo "unexpected archive layout." >&2; exit 1; }
 
-cp -a "$SRC/." "$DEST/" || { echo "کپی به ${DEST} ناموفق بود." >&2; exit 1; }
+cp -a "$SRC/." "$DEST/" || { echo "copying to ${DEST} failed." >&2; exit 1; }
 chmod +x "$DEST/vt" "$DEST"/lib/*.sh 2>/dev/null || true
 ln -sf "$DEST/vt" /usr/local/bin/vt
 
-echo "==> نصب شد در ${DEST} — دستور «vt» آماده است."
+echo "==> installed in ${DEST} - the 'vt' command is ready."
 echo
 exec "$DEST/vt"

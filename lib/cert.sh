@@ -31,36 +31,36 @@ cert_install_acme() {
   local bin home
   bin=$(acme_bin); home=$(acme_home)
   if [[ -x "$bin" ]]; then
-    log_ok "acme.sh از قبل موجود است."
+    log_ok "acme.sh is already present."
     return 0
   fi
   mkdir -p "$home" "$(dirname "$bin")"
-  log_info "دریافت acme.sh ..."
+  log_info "fetching acme.sh ..."
   if [[ "$VT_SKIP_DOWNLOADS" != "1" ]]; then
     if curl -fsSL --connect-timeout 10 --max-time 60 -o "$bin" "$ACME_RAW_URL"; then
       :
     else
-      log_note "raw.githubusercontent در دسترس نبود، از آرشیو GitHub استفاده می‌کنم."
+      log_note "raw.githubusercontent was unreachable; using the GitHub archive instead."
       local tmp; tmp=$(mktemp -d)
       # shellcheck disable=SC2064
       trap "rm -rf '$tmp'" RETURN
       curl -fsSL --max-time 120 -o "$tmp/a.tgz" "$ACME_TARBALL_URL" \
-        || fail "دانلود acme.sh ناموفق بود."
-      tar xzf "$tmp/a.tgz" -C "$tmp" || fail "استخراج acme.sh ناموفق بود."
+        || fail "failed to download acme.sh."
+      tar xzf "$tmp/a.tgz" -C "$tmp" || fail "failed to extract acme.sh."
       local src
       src=$(find "$tmp" -maxdepth 2 -name acme.sh -type f | head -n1)
-      [[ -n "$src" ]] || fail "acme.sh داخل آرشیو پیدا نشد."
+      [[ -n "$src" ]] || fail "acme.sh was not found inside the archive."
       cp "$src" "$bin"
     fi
     chmod +x "$bin"
   else
-    log_note "[dry] acme.sh دانلود نشد (VT_SKIP_DOWNLOADS=1)"
+    log_note "[dry] acme.sh not downloaded (VT_SKIP_DOWNLOADS=1)"
     printf '#!/bin/sh\nexit 0\n' >"$bin"
     chmod +x "$bin"
   fi
   # acme.sh keeps account keys and per-domain state here.
   export LE_WORKING_DIR="$home"
-  log_ok "acme.sh آماده است: $bin"
+  log_ok "acme.sh ready: $bin"
 }
 
 # Build the acme.sh invocation prefix.
@@ -93,18 +93,18 @@ cert_issue_domain() {
       cmd+=(--dns "${extra[0]}")
       export "${extra[1]}=${extra[2]}"
       ;;
-    *) fail "روش ناشناخته صدور گواهی: $method" ;;
+    *) fail "unknown certificate method: $method" ;;
   esac
 
-  log_info "صدور گواهی Let's Encrypt برای $domain (روش: $method) ..."
+  log_info "issuing a Let's Encrypt certificate for $domain (method: $method) ..."
   if [[ "$VT_SKIP_DOWNLOADS" == "1" ]]; then
     log_note "[dry] acme.sh ${cmd[*]}"
     _write_placeholder_cert "$domain"
   else
     _acme "${cmd[@]}" || {
-      log_err "صدور گواهی ناموفق بود."
-      log_warn "دلایل رایج: رکورد DNS به این سرور اشاره نمی‌کند، پورت 80 بسته است،"
-      log_warn "یا فایروال پنل ابری بسته است. می‌توانید روش DNS را انتخاب کنید."
+      log_err "certificate issuance failed."
+      log_warn "common causes: the DNS record does not point at this server, port 80 is closed,"
+      log_warn "or the cloud firewall blocks it. You can use the DNS method instead."
       return 1
     }
   fi
@@ -124,14 +124,14 @@ cert_issue_ip() {
                 --cert-profile shortlived --days 3
                 --keylength ec-256 --standalone -m "$email")
 
-  log_info "صدور گواهی Let's Encrypt برای آی‌پی $ip (پروفایل shortlived) ..."
-  log_note "پورت 80 باید در زمان صدور و هر ~3 روز برای تمدید باز باشد."
+  log_info "issuing a Let's Encrypt certificate for IP $ip (shortlived profile) ..."
+  log_note "port 80 must be open for issuance and again every ~3 days for renewal."
   if [[ "$VT_SKIP_DOWNLOADS" == "1" ]]; then
     log_note "[dry] acme.sh ${cmd[*]}"
     _write_placeholder_cert "$ip"
   else
     _acme "${cmd[@]}" || {
-      log_err "صدور گواهی برای آی‌پی ناموفق بود."
+      log_err "issuing a certificate for the IP address failed."
       return 1
     }
   fi
@@ -152,12 +152,12 @@ _install_cert() {
     --key-file "$(key_file)" \
     --fullchain-file "$(cert_file)" \
     --reloadcmd "$reload" \
-    || fail "کپی گواهی به $R_CERT_DIR ناموفق بود."
+    || fail "failed to copy the certificate into $R_CERT_DIR."
   chmod 600 "$(key_file)"
   chmod 644 "$(cert_file)"
   VT_TLS_CERT_FILE="$R_CERT_FILE"
   VT_TLS_KEY_FILE="$R_KEY_FILE"
-  log_ok "گواهی در $R_CERT_FILE ذخیره شد و تمدید خودکار فعال است."
+  log_ok "certificate stored at $R_CERT_FILE; automatic renewal is active."
 }
 
 # --------------------------------------------------------------------------
@@ -196,7 +196,7 @@ ${san}
 subjectKeyIdentifier   = hash
 EOF
 
-  log_info "ساخت گواهی خودامضا برای $host (اعتبار ${days} روز) ..."
+  log_info "creating a self-signed certificate for $host (valid ${days} days) ..."
   openssl req -x509 -new -newkey ec \
     -pkeyopt ec_paramgen_curve:prime256v1 -nodes \
     -keyout "$(key_file)" -out "$(cert_file)" \
@@ -204,15 +204,15 @@ EOF
     || openssl req -x509 -newkey rsa:2048 -nodes \
          -keyout "$(key_file)" -out "$(cert_file)" \
          -days "$days" -config "$tmp" -sha256 >/dev/null 2>&1 \
-    || fail "ساخت گواهی خودامضا ناموفق بود."
+    || fail "failed to create the self-signed certificate."
 
   chmod 600 "$(key_file)"
   chmod 644 "$(cert_file)"
   VT_TLS_CERT_FILE="$R_CERT_FILE"
   VT_TLS_KEY_FILE="$R_KEY_FILE"
-  log_ok "گواهی خودامضا ساخته شد: $R_CERT_FILE"
-  log_warn "گواهی خودامضا توسط کلاینت‌ها معتبر شناخته نمی‌شود؛"
-  log_warn "در تنظیمات کلاینت باید allowInsecure / «رد کردن اعتبارسنجی» فعال باشد."
+  log_ok "self-signed certificate created: $R_CERT_FILE"
+  log_warn "clients will not trust a self-signed certificate;"
+  log_warn "the client must enable allowInsecure / "skip certificate verification"."
 }
 
 _write_placeholder_cert() {
@@ -247,7 +247,7 @@ cert_renew() {
         ;;
     esac
   } >>"$logf" 2>&1
-  log_ok "بررسی تمدید گواهی انجام شد (لاگ: $R_LOG/cert-renew.log)"
+  log_ok "certificate renewal check done (log: $R_LOG/cert-renew.log)"
 }
 
 # Regenerate the self-signed certificate once it is past half its lifetime.

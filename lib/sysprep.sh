@@ -11,7 +11,7 @@ sysprep_packages() {
 # --------------------------------------------------------------------------
 sysprep_enable_bbr() {
   if [[ "$VT_SKIP_SYSTEMD" == "1" ]]; then
-    log_note "[dry] BBR/sysctl اعمال نشد."
+    log_note "[dry] BBR/sysctl not applied."
     return 0
   fi
   local f; f=$(p "$R_SYSCTL")
@@ -42,10 +42,10 @@ EOF
   local cur
   cur=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo '?')
   if [[ "$cur" == "bbr" ]]; then
-    log_ok "BBR فعال است."
+    log_ok "BBR is active."
   else
-    log_warn "BBR فعال نشد (الگوریتم فعلی: $cur)."
-    log_note "اگر هسته قدیمی است، BBR در دسترس نیست؛ بقیه تنظیمات همچنان اعمال شدند."
+    log_warn "BBR could not be enabled (current algorithm: $cur)."
+    log_note "if the kernel is old, BBR is unavailable; the other settings still applied."
   fi
 }
 
@@ -54,7 +54,7 @@ sysprep_remove_bbr() {
   if [[ -f "$f" ]]; then
     rm -f "$f"
     sysctl --system >/dev/null 2>&1 || true
-    log_ok "تنظیمات sysctl حذف شد."
+    log_ok "sysctl settings removed."
   fi
 }
 
@@ -64,21 +64,21 @@ sysprep_remove_bbr() {
 sysprep_swap() {
   local size_mb="${1:-1024}"
   if swapon --show=NAME --noheadings 2>/dev/null | grep -q .; then
-    log_note "swap از قبل فعال است."
+    log_note "swap is already active."
     return 0
   fi
   local mem_kb total_mb
   mem_kb=$(awk '/MemTotal/ {print $2}' /proc/meminfo)
   total_mb=$((mem_kb / 1024))
   if (( total_mb >= 2048 )); then
-    log_note "حافظه کافی است (${total_mb}MB) — swap ساخته نشد."
+    log_note "enough memory (${total_mb}MB) - no swap created."
     return 0
   fi
   if [[ "$VT_SKIP_SYSTEMD" == "1" ]]; then
-    log_note "[dry] swap ساخته نشد."
+    log_note "[dry] swap not created."
     return 0
   fi
-  log_info "حافظه کم است (${total_mb}MB) — ساخت swap ${size_mb}MB ..."
+  log_info "low memory (${total_mb}MB) - creating ${size_mb}MB of swap ..."
   local f; f=$(p "$R_SWAPFILE")
   fallocate -l "${size_mb}M" "$f" 2>/dev/null \
     || dd if=/dev/zero of="$f" bs=1M count="$size_mb" status=none || return 1
@@ -88,7 +88,7 @@ sysprep_swap() {
   if ! grep -qs "^$R_SWAPFILE" /etc/fstab; then
     printf '%s none swap sw 0 0\n' "$R_SWAPFILE" >>/etc/fstab
   fi
-  log_ok "swap فعال شد."
+  log_ok "swap enabled."
 }
 
 sysprep_remove_swap() {
@@ -99,7 +99,7 @@ sysprep_remove_swap() {
   if [[ -w /etc/fstab ]]; then
     sed -i "\|^$R_SWAPFILE |d" /etc/fstab
   fi
-  log_ok "swap حذف شد."
+  log_ok "swap removed."
 }
 
 # --------------------------------------------------------------------------
@@ -108,20 +108,20 @@ sysprep_remove_swap() {
 sysprep_time_sync() {
   if systemd_running; then
     if systemctl is-active --quiet systemd-timesyncd 2>/dev/null; then
-      log_ok "همگام‌سازی زمان فعال است (timesyncd)."
+      log_ok "time synchronisation is active (timesyncd)."
       return 0
     fi
     systemctl enable --now systemd-timesyncd >/dev/null 2>&1 && {
-      log_ok "timesyncd فعال شد."
+      log_ok "timesyncd enabled."
       return 0
     }
   fi
   if have chronyc || have ntpd; then
-    log_ok "یک سرویس زمان (chrony/ntp) در حال اجراست."
+    log_ok "a time service (chrony/ntp) is already running."
     return 0
   fi
-  log_warn "سرویس همگام‌سازی زمان پیدا نشد."
-  log_note "در صورت نبود NTP، خطای ساعت می‌تواند اتصال TLS را قطع کند:"
+  log_warn "no time synchronisation service found."
+  log_note "without NTP a drifting clock will break TLS handshakes:"
   log_note "  apt-get install -y chrony && systemctl enable --now chrony"
 }
 
@@ -153,7 +153,7 @@ EOF
 
 # One-shot preparation used by the installer.
 sysprep_all() {
-  log_step "آماده‌سازی سیستم"
+  log_step "preparing the system"
   sysprep_packages
   sysprep_dirs
   sysprep_time_sync

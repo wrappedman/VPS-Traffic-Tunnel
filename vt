@@ -99,7 +99,7 @@ case "$CMD" in
         --no-torrent)    [[ "$2" == "yes" ]] && WIZ_BLOCK_TORRENT=1 || WIZ_BLOCK_TORRENT=0; shift 2 ;;
         --force)         VT_FORCE=1; shift ;;
         --yes|-y)        VT_ASSUME_YES=1; shift ;;
-        *) die "گزینه ناشناخته: $1" ;;
+        *) die "unknown option: $1" ;;
       esac
     done
     do_install
@@ -112,7 +112,7 @@ case "$CMD" in
         --force)      VT_FORCE=1; shift ;;
         --purge)      VT_UNINSTALL_KEEP_ETC=n; shift ;;
         --yes|-y)     VT_ASSUME_YES=1; shift ;;
-        *) die "گزینه ناشناخته: $1" ;;
+        *) die "unknown option: $1" ;;
       esac
     done
     cmd_uninstall
@@ -145,7 +145,7 @@ case "$CMD" in
   version|-v|--version) printf '%s %s\n' "$VT_PROJECT" "$VT_VERSION" ;;
   help|-h|--help)     usage ;;
   *)
-    log_err "دستور ناشناخته: $CMD"
+    log_err "unknown command: $CMD"
     usage
     exit 1
     ;;

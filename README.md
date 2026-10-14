@@ -1,204 +1,216 @@
 # VPS-Traffic-Tunnel
 
-یک برنامه‌ی تک‌فایلی (Bash) برای سرورهای مجازی Ubuntu/Debian که **بدون محیط گرافیکی و فقط با SSH** اجرا می‌شود و در چند دقیقه یک **تونل VLESS همیشه‌فعال** روی سرور شما نصب می‌کند.
+A single Bash program for Ubuntu/Debian VPS boxes that you reach **only over SSH — no GUI**. It installs an **always-on VLESS tunnel** and hands you a ready-to-use client config in a few minutes.
 
-بعد از اجرا یک منوی ساده می‌بینید:
+After you run it you get a simple menu:
 
 ```
-  1) install      — نصب تونل و سرویس همیشه‌فعال
-  2) viewConfig   — نمایش کانفیگ، لینک اشتراک و کد QR
-  3) uninstall    — حذف کامل
+  1) install      - install the tunnel and the always-on service
+  2) viewConfig   - show the config, share link and QR code
+  3) uninstall    - remove everything
 ```
 
-`install` از شما می‌پرسد دامنه دارید یا نه، پورت تصادفی انتخاب می‌کند، گواهی SSL رایگان با **تمدید خودکار** می‌گیرد، یک سرویس systemd می‌سازد که با هر ریبوت بالا می‌آید، و در پایان کانفیگ آماده + کد QR را نشان می‌دهد.
+`install` asks whether you have a domain, picks a random port, gets a free
+SSL certificate with **automatic renewal**, creates a systemd service that
+comes back on every reboot, and finally prints the config plus a QR code.
 
 ---
 
-## نصب سریع
+## Quick start
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/wrappedman/VPS-Traffic-Tunnel/main/bootstrap.sh | sudo bash
 sudo vt
 ```
 
-یا دستی:
+Or manually:
 
 ```bash
 sudo apt-get update && sudo apt-get install -y git
 git clone https://github.com/wrappedman/VPS-Traffic-Tunnel.git
 cd VPS-Traffic-Tunnel
-sudo ./vt self-install     # برنامه را در /opt/vt می‌گذارد و دستور vt را در PATH قرار می‌دهد
+sudo ./vt self-install     # puts the program in /opt/vt and `vt` on PATH
 sudo vt
 ```
 
 ---
 
-## چه چیزی نصب می‌شود؟
+## What gets installed
 
-| مورد | توضیح |
+| Component | Details |
 |---|---|
-| **Xray-core** | آخرین نسخه از GitHub، در `/usr/local/bin/xray` |
-| **سرویس systemd** | `xray.service` با `Restart=always` و `WantedBy=multi-user.target` → همیشه فعال، حتی بعد از ریبوت |
-| **کانفیگ VLESS** | در `/usr/local/etc/xray/config.json` با پورت تصادفی |
-| **گواهی SSL** | Let's Encrypt (دامنه یا آی‌پی) یا خودامضا — همه رایگان و با تمدید خودکار |
-| **تایمر سلامت** | هر ۵ دقیقه سرویس و پورت را بررسی می‌کند و در صورت قطعی، ری‌استارت می‌کند |
-| **تایمر تمدید گواهی** | هر ۱۲ ساعت (به‌علاوه‌ی cron خودِ acme.sh) |
-| **BBR و تنظیمات شبکه** | `/etc/sysctl.d/99-vt-tunnel.conf` |
-| **swap** | اگر RAM سرور کمتر از ۲ گیگ باشد |
-| **فایروال UFW** | فقط پورت SSH و پورت تونل باز می‌ماند |
-| **logrotate** | لاگ‌ها خودکار چرخش می‌شوند |
-| **خودِ برنامه** | در پایان نصب به `/opt/vt` کپی می‌شود و دستور `vt` در PATH قرار می‌گیرد (تایمرها به همین مسیر نیاز دارند) |
+| **Xray-core** | latest release from GitHub, at `/usr/local/bin/xray` |
+| **systemd service** | `xray.service` with `Restart=always` and `WantedBy=multi-user.target` → always on, even after a reboot |
+| **VLESS config** | `/usr/local/etc/xray/config.json` with a random port |
+| **SSL certificate** | Let's Encrypt (domain or IP) or self-signed — all free, all auto-renewing |
+| **Health timer** | checks the service and the port every 5 minutes and restarts on failure |
+| **Cert renewal timer** | every 12 hours (plus acme.sh's own cron job) |
+| **BBR + TCP tuning** | `/etc/sysctl.d/99-vt-tunnel.conf` |
+| **Swap** | only when the box has less than 2 GB of RAM |
+| **UFW firewall** | only the SSH port and the tunnel port stay open |
+| **logrotate** | logs are rotated automatically |
+| **The program itself** | copied to `/opt/vt` at the end of the install, with `vt` on PATH (the timers need that path) |
 
 ---
 
-## سه حالت تونل
+## Three tunnel modes
 
-### ۱) REALITY — پیشنهاد ما
+### 1) REALITY — recommended
 ```
 VLESS + TCP + REALITY (XTLS Vision)
 ```
-* **بدون دامنه** و **بدون گواهی SSL** کار می‌کند — مستقیم روی آی‌پی.
-* ترافیک شما پشت یک دست‌دادن TLS واقعی با یک سایت معروف (مثل `www.microsoft.com`) پنهان می‌شود، بنابراین از بیرون مثل یک اتصال HTTPS معمولی به آن سایت به نظر می‌رسد.
-* بهترین گزینه وقتی دامنه ندارید.
+* Works on a bare IP with **no domain and no certificate**.
+* Your traffic is hidden inside a real TLS handshake with a well-known site
+  (e.g. `www.microsoft.com`), so from the outside it looks like an ordinary
+  HTTPS connection to that site.
+* The best choice when you have no domain.
 
-### ۲) WebSocket + TLS (پورت ۴۴۳)
+### 2) WebSocket + TLS (port 443)
 ```
 VLESS + WebSocket + TLS
 ```
-* شبیه‌ترین حالت به یک وب‌سایت HTTPS واقعی.
-* مسیر WebSocket یک رشته‌ی تصادفی ۳۲ کاراکتری است (`/a3f9…/`).
-* نیاز به گواهی SSL دارد.
+* Closest to an ordinary HTTPS website.
+* The WebSocket path is a random 32-character string (`/a3f9…/`).
+* Needs a TLS certificate.
 
-### ۳) TCP + TLS (پورت دلخواه)
+### 3) TCP + TLS (custom port)
 ```
 VLESS + TCP + TLS (XTLS Vision)
 ```
-* مثل حالت ۱ ولی با TLS واقعی به‌جای REALITY.
-* نیاز به گواهی SSL دارد.
+* Like mode 1 but with real TLS instead of REALITY.
+* Needs a TLS certificate.
 
 ---
 
-## گواهی SSL رایگان با تمدید خودکار
+## Free SSL with automatic renewal
 
-سه مسیر وجود دارد و خودِ برنامه در هنگام نصب پیشنهاد درست را می‌دهد:
+There are three routes and the installer suggests the right one:
 
-### الف) دامنه دارید → Let's Encrypt
-گواهی ۹۰ روزه‌ی معتبر، تمدید خودکار با acme.sh. سه روش تأیید:
+### a) You have a domain → Let's Encrypt
+A trusted 90-day certificate, renewed automatically by acme.sh. Three
+validation methods:
 
-| روش | کی استفاده شود |
+| Method | When to use it |
 |---|---|
-| **standalone** | ساده‌ترین. اسکریپت موقتاً پورت ۸۰ را باز می‌کند. پورت ۸۰ باید آزاد و باز باشد. |
-| **webroot** | اگر یک وب‌سرور (nginx/apache) روی پورت ۸۰ در حال اجراست. |
-| **DNS API** | اگر دامنه هنوز به این سرور اشاره نمی‌کند یا پورت ۸۰ بسته است. با توکن Cloudflare (`dns_cf`) و سایر پلاگین‌های acme.sh کار می‌کند. |
+| **standalone** | simplest. The script binds port 80 briefly. Port 80 must be free and open. |
+| **webroot** | when a web server (nginx/apache) is already listening on port 80. |
+| **DNS API** | when the domain does not point at the server yet, or port 80 is closed. Works with a Cloudflare token (`dns_cf`) and any other acme.sh plugin. |
 
-### ب) دامنه ندارید → گواهی Let's Encrypt مخصوص آی‌پی
-از **۱۵ ژانویه ۲۰۲۶** لتس‌انکریپت برای آدرس IP هم گواهی معتبر می‌دهد. شرایطش:
+### b) No domain → Let's Encrypt certificate for the IP address
+Since **15 January 2026** Let's Encrypt issues trusted certificates for IP
+addresses. The conditions:
 
-* پروفایل `shortlived` — اعتبار گواهی **۱۶۰ ساعت** (کمی بیش از ۶ روز) است.
-* فقط با `http-01` یا `tls-alpn-01`؛ یعنی **پورت ۸۰ باید باز باشد**.
-* برنامه هر ۳ روز بررسی و خودکار تمدید می‌کند (`acme.sh --days 3`).
+* the ACME `shortlived` profile — the certificate is valid for **160 hours**
+  (a little over six days);
+* only `http-01` or `tls-alpn-01`, i.e. **port 80 must be reachable**;
+* the program requests it with `--cert-profile shortlived --days 3` and
+  renews it automatically.
 
-نتیجه: یک گواهی **معتبر و سبز** روی آی‌پی خام، بدون allowInsecure.
+Result: a genuinely trusted certificate on a bare IP, with no `allowInsecure`.
 
-### ج) گواهی خودامضا
-اگر نه دامنه دارید و نه می‌خواهید پورت ۸۰ باز باشد:
+### c) Self-signed
+If you have no domain and do not want to open port 80:
 
-* با OpenSSL ساخته می‌شود (ECDSA P-256، اعتبار ۸۲۵ روز).
-* یک تایمر systemd هر ۱۲ ساعت بررسی و در نیمه‌ی عمر، خودکار تمدید می‌کند.
-* **توجه:** کلاینت باید `allowInsecure` را فعال کند — برنامه این را خودش در کانفیگ و لینک اشتراک می‌گذارد.
+* generated with OpenSSL (ECDSA P-256, valid 825 days);
+* a systemd timer checks it every 12 hours and regenerates it at half its
+  lifetime;
+* **note:** clients must enable `allowInsecure` — the program puts that flag
+  into the config and the share link for you.
 
 ---
 
-## عبور «تمام» ترافیک از سرور
+## Routing *all* of your traffic through the VPS
 
-سمت سرور، تمام ترافیک ورودی از تونل به اینترنت می‌رود (خروجی پیش‌فرض `freedom` است). سمت کلاینت باید حالت «تمام ترافیک» را روشن کنید:
+On the server side, everything that arrives through the tunnel leaves from the
+VPS (the default outbound is `freedom`). On the client side you have to turn on
+the "all traffic" mode:
 
-| پلتفرم | چه کار کنید |
+| Platform | What to do |
 |---|---|
-| **اندروید** | v2rayNG / Happ / Streisand → لینک را وارد کنید → حالت **TUN** یا **Global** |
-| **iOS/macOS** | Streisand / V2Box / Shadowrocket → **Set as system proxy** یا **Global Routing** |
-| **ویندوز** | v2rayN → Import from clipboard → Routing را **Global** کنید و **Set system proxy** را بزنید |
-| **لینوکس/دسکتاپ** | فایل `/etc/vt/client.json` را با `xray run -c client.json` اجرا کنید و پروکسی سیستم را روی `127.0.0.1:10808` (SOCKS) یا `10809` (HTTP) بگذارید |
+| **Android** | v2rayNG / Happ / Streisand → add the link → enable **TUN** or **Global** routing |
+| **iOS/macOS** | Streisand / V2Box / Shadowrocket → **Set as system proxy** or **Global Routing** |
+| **Windows** | v2rayN → Import from clipboard → set routing to **Global** and press **Set system proxy** |
+| **Linux desktop** | run `/etc/vt/client.json` with `xray run -c client.json`, then point the system proxy at `127.0.0.1:10808` (SOCKS) or `10809` (HTTP) |
 
 ---
 
-## راهنمای دستورات
+## Command reference
 
 ```bash
-sudo vt                       # منوی تعاملی
+sudo vt                       # interactive menu
 ```
 
-### اصلی
-| دستور | کار |
+### Main
+| Command | What it does |
 |---|---|
-| `vt install` | نصب (تعاملی) |
-| `vt viewconfig` | نمایش کانفیگ، لینک اشتراک و QR |
-| `vt uninstall [--purge]` | حذف کامل (`--purge` پوشه‌ی `/etc/vt` را هم پاک می‌کند) |
+| `vt install` | install (interactive) |
+| `vt viewconfig` | show the config, share link and QR code |
+| `vt uninstall [--purge]` | remove everything (`--purge` also deletes `/etc/vt`) |
 
-### نصب خودکار (بدون پرسش)
+### Unattended install
 ```bash
-# REALITY روی آی‌پی با پورت تصادفی
+# REALITY on the IP with a random port
 sudo vt install --mode reality --port random --email main --yes
 
-# WebSocket+TLS با دامنه و گواهی Let's Encrypt
+# WebSocket+TLS with a domain and a Let's Encrypt certificate
 sudo vt install --mode ws-tls --domain tunnel.example.com \
      --cert letsencrypt-domain --acme standalone --port 443 --yes
 
-# گواهی Let's Encrypt مخصوص آی‌پی
+# Let's Encrypt certificate for the IP address
 sudo vt install --mode tcp-tls --cert letsencrypt-ip --port random --yes
 
-# دامنه‌ای که هنوز DNS ندارد، با توکن Cloudflare
+# A domain whose DNS is not set up yet, using a Cloudflare token
 sudo vt install --mode ws-tls --domain tunnel.example.com \
      --cert letsencrypt-domain --acme dns \
      --dns-plugin dns_cf --dns-token "YOUR_CF_TOKEN" --yes
 ```
 
-گزینه‌ها: `--mode --domain --cert --acme --webroot --dns-plugin --dns-env --dns-token --sni --port --email --email-acme --firewall --adblock --no-torrent --force --yes`
+Options: `--mode --domain --cert --acme --webroot --dns-plugin --dns-env --dns-token --sni --port --email --email-acme --firewall --adblock --no-torrent --force --yes`
 
-### مدیریت کاربران
+### User management
 ```bash
-sudo vt add-user [name]     # کاربر جدید + لینک اشتراک + QR
+sudo vt add-user [name]     # new user + share link + QR
 sudo vt rm-user [name]
-sudo vt users               # لیست کاربران و لینک‌ها
-sudo vt stats               # ترافیک مصرفی هر کاربر
-sudo vt connections         # اتصالات برقرار
-sudo vt rotate-uuid [name]  # تعویض UUID
-sudo vt rotate-keys         # چرخش کلیدهای REALITY (کل کانفیگ‌ها عوض می‌شود)
+sudo vt users               # list users and their links
+sudo vt stats               # traffic per user
+sudo vt connections         # established connections
+sudo vt rotate-uuid [name]  # rotate a UUID
+sudo vt rotate-keys         # rotate the REALITY keypair (invalidates all clients)
 ```
 
-### سرویس و نگهداری
+### Service and maintenance
 ```bash
 sudo vt status
 sudo vt restart | stop | start
 sudo vt logs [xray|error|health|cert|install|follow]
-sudo vt doctor              # عیب‌یابی خودکار
-sudo vt health              # همان کاری که تایمر سلامت انجام می‌دهد
-sudo vt update              # به‌روزرسانی Xray-core
-sudo vt renew-cert          # تمدید دستی گواهی
-sudo vt selfsigned-cert     # ساخت گواهی خودامضای جدید
-sudo vt port <n|random>     # تغییر پورت
-sudo vt switch-mode         # تغییر حالت تونل
-sudo vt backup [dir]        # پشتیبان‌گیری
-sudo vt restore <file>      # بازگردانی
+sudo vt doctor              # automated diagnostics
+sudo vt health              # exactly what the health timer runs
+sudo vt update              # update Xray-core
+sudo vt renew-cert          # renew the certificate manually
+sudo vt selfsigned-cert     # create a fresh self-signed certificate
+sudo vt port <n|random>     # change the port
+sudo vt switch-mode         # change the tunnel mode
+sudo vt backup [dir]        # create a backup
+sudo vt restore <file>      # restore
 ```
 
 ---
 
-## ساختار فایل‌ها
+## File layout
 
 ```
-/etc/vt/                     state، کاربران، گواهی‌ها، کانفیگ متنی   (0700)
-├── vt.env                   وضعیت نصب (MODE، PORT، کلیدها و ...)
-├── users.json               لیست کاربران
-├── certs/                   fullchain.pem و privkey.pem
-├── acme.sh + acme/          ابزار و حساب Let's Encrypt
-├── config.txt               کانفیگ متنی
-└── client.json              کانفیگ آماده‌ی کلاینت دسکتاپ
+/etc/vt/                     state, users, certificates, text config   (0700)
+├── vt.env                   install state (MODE, PORT, keys, ...)
+├── users.json               user list
+├── certs/                   fullchain.pem and privkey.pem
+├── acme.sh + acme/          ACME client and account
+├── config.txt               human-readable config
+└── client.json              ready-to-run desktop client config
 
-/usr/local/etc/xray/config.json      پیکربندی Xray
-/usr/local/bin/xray                  باینری Xray
-/usr/local/share/xray/               geoip.dat / geosite.dat (اختیاری)
-/var/log/vt/                         لاگ نصب، سلامت، گواهی، خطاهای Xray
+/usr/local/etc/xray/config.json      Xray configuration
+/usr/local/bin/xray                  Xray binary
+/usr/local/share/xray/               geoip.dat / geosite.dat (optional)
+/var/log/vt/                         install, health, cert and Xray error logs
 
 /etc/systemd/system/xray.service
 /etc/systemd/system/vt-health.{service,timer}
@@ -209,26 +221,34 @@ sudo vt restore <file>      # بازگردانی
 
 ---
 
-## نکات امنیتی که رعایت شده
+## Security properties
 
-* API آماری Xray فقط روی `127.0.0.1` گوش می‌دهد.
-* مسیرهای خصوصی (`10/8`, `172.16/12`, `192.168/16`, `127/8`, `100.64/10`, `169.254/16`, `fc00::/7`) در خروجی مسدود هستند تا از تونل برای اسکن شبکه‌ی داخلی دیتاسنتر استفاده نشود.
-* `/etc/vt` با مجوز `0700` و کلید خصوصی با `0600` ذخیره می‌شود.
-* در حالت TLS، `rejectUnknownSni` فعال است تا پروب‌های ناشناس رد شوند (برای گواهی آی‌پی به‌طور خودکار غیرفعال می‌شود، چون کلاینت برای IP مقدار SNI نمی‌فرستد).
-* قبل از فعال‌کردن فایروال، پورت SSH از روی همان اتصال جاری (`$SSH_CONNECTION`) تشخیص داده و از شما تأیید می‌گیرد.
-* مسیر WebSocket و ShortId تصادفی هستند.
+* The Xray stats/handler API listens on `127.0.0.1` only.
+* Private ranges (`10/8`, `172.16/12`, `192.168/16`, `127/8`, `100.64/10`,
+  `169.254/16`, `fc00::/7`, `fe80::/10`) are blackholed on the outbound side, so
+  the tunnel cannot be used to scan the data centre's internal network.
+* `/etc/vt` is `0700` and the private key is `0600`.
+* `rejectUnknownSni` is on for TLS modes so unidentified probes are dropped
+  (automatically off for IP certificates, because clients send no SNI for a
+  bare IP).
+* The SSH port is read from the live `$SSH_CONNECTION` and confirmed with you
+  before UFW is enabled.
+* WebSocket paths and REALITY short IDs are random.
 
 ---
 
-## تست
+## Tests
 
 ```bash
 ./tests/run_tests.sh
 ```
 
-شش مرحله: بررسی نحو، ShellCheck، تست واحد توابع، **نصب کامل خشک (dry-run) برای هر چهار ترکیب حالت/گواهی** داخل یک ریشه‌ی موقت، اعتبارسنجی ساختار کانفیگ Xray، و تست حذف.
+Six stages: syntax check, ShellCheck, unit tests, **full dry-run installs for
+all four mode/certificate combinations** inside a throwaway root, Xray config
+schema validation, and uninstall.
 
-نصب خشک با متغیر `VT_ROOT` کار می‌کند: تمام مسیرها پیشوند می‌گیرند، بنابراین کل جریان نصب واقعاً اجرا می‌شود بدون اینکه به سیستم دست بزند.
+The dry-run works through the `VT_ROOT` variable: every path is prefixed, so
+the real install flow executes end to end without touching the host.
 
 ```
 PASS: 163   FAIL: 0
@@ -236,22 +256,22 @@ PASS: 163   FAIL: 0
 
 ---
 
-## رفع اشکال سریع
+## Quick troubleshooting
 
-| مشکل | راه‌حل |
+| Problem | What to do |
 |---|---|
-| وصل نمی‌شوم | `sudo vt doctor` — سپس فایروال پنل ابری را چک کنید |
-| پورت باز است ولی اتصال برقرار نمی‌شود | در حالت REALITY، سایت استتار (`--sni`) را عوض کنید |
-| `certificate has expired` | `sudo vt renew-cert` و سپس `sudo vt logs cert` |
-| سرویس بالا نمی‌آید | `sudo vt logs error` |
-| سرعت کم است | `sysctl net.ipv4.tcp_congestion_control` باید `bbr` باشد |
+| cannot connect | `sudo vt doctor`, then check the cloud provider's firewall |
+| port is open but nothing connects | in REALITY mode, change the camouflage site (`--sni`) |
+| `certificate has expired` | `sudo vt renew-cert`, then `sudo vt logs cert` |
+| the service will not start | `sudo vt logs error` |
+| slow | `sysctl net.ipv4.tcp_congestion_control` should say `bbr` |
 
-جزئیات بیشتر: [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md)
+More: [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md)
 
 ---
 
-## مجوز
+## License
 
-GPL-3.0 — فایل [LICENSE](LICENSE) را ببینید.
+GPL-3.0 — see [LICENSE](LICENSE).
 
-English documentation: [`docs/README.en.md`](docs/README.en.md)
+A Persian translation of this document lives at [`docs/README.fa.md`](docs/README.fa.md).

@@ -15,7 +15,7 @@ xray_arch() {
     armv6*) printf 'arm32-v6' ;;
     armv5*) printf 'arm32-v5' ;;
     riscv64) printf 'riscv64' ;;
-    *) fail "معماری پشتیبانی‌نشده: $m" ;;
+    *) fail "unsupported architecture: $m" ;;
   esac
 }
 
@@ -44,10 +44,10 @@ download_and_install_xray() {
   arch=$(xray_arch)
 
   if [[ -n "$tag" ]]; then
-    log_info "نسخه درخواستی Xray: $tag"
+    log_info "requested Xray version: $tag"
   else
-    log_info "پیدا کردن آخرین نسخه Xray-core ..."
-    tag=$(xray_latest_tag) || fail "نتوانستم آخرین نسخه Xray را از GitHub بگیرم."
+    log_info "looking up the latest Xray-core release ..."
+    tag=$(xray_latest_tag) || fail "could not fetch the latest Xray release from GitHub."
   fi
 
   url="https://github.com/${XRAY_REPO}/releases/download/${tag}/Xray-linux-${arch}.zip"
@@ -55,29 +55,29 @@ download_and_install_xray() {
   # shellcheck disable=SC2064
   trap "rm -rf '$tmp'" RETURN
 
-  log_info "دانلود: $url"
+  log_info "downloading: $url"
   curl -fL --connect-timeout 10 --max-time 300 --retry 3 \
-    -o "$tmp/xray.zip" "$url" || fail "دانلود Xray ناموفق بود."
+    -o "$tmp/xray.zip" "$url" || fail "failed to download Xray."
 
-  log_info "استخراج ..."
+  log_info "extracting ..."
   if have unzip; then
-    unzip -oq "$tmp/xray.zip" -d "$tmp/out" || fail "استخراج آرشیو ناموفق بود."
+    unzip -oq "$tmp/xray.zip" -d "$tmp/out" || fail "failed to extract the archive."
   elif have python3; then
     mkdir -p "$tmp/out"
-    python3 - "$tmp/xray.zip" "$tmp/out" <<'PY' || fail "استخراج آرشیو ناموفق بود."
+    python3 - "$tmp/xray.zip" "$tmp/out" <<'PY' || fail "failed to extract the archive."
 import sys, zipfile
 zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])
 PY
   else
-    fail "برای استخراج به unzip یا python3 نیاز است."
+    fail "unzip or python3 is required to extract the archive."
   fi
 
   mkdir -p "$(p "$R_XRAY_ASSETS")" "$(p "$(dirname "$R_XRAY_BIN")")"
-  install -m 0755 "$tmp/out/xray" "$(p "$R_XRAY_BIN")" || fail "کپی باینری Xray ناموفق بود."
+  install -m 0755 "$tmp/out/xray" "$(p "$R_XRAY_BIN")" || fail "failed to install the Xray binary."
   if [[ -f "$tmp/out/geoip.dat" ]]; then install -m 0644 "$tmp/out/geoip.dat" "$(p "$R_XRAY_ASSETS/geoip.dat")"; fi
   if [[ -f "$tmp/out/geosite.dat" ]]; then install -m 0644 "$tmp/out/geosite.dat" "$(p "$R_XRAY_ASSETS/geosite.dat")"; fi
 
-  log_ok "Xray نصب شد: $(bin_or_installed_version)"
+  log_ok "Xray installed: $(bin_or_installed_version)"
 }
 
 # helper used above so the log line survives the RETURN trap
@@ -92,11 +92,11 @@ download_geo_assets() {
   mkdir -p "$dir"
   local ok=1
   if [[ ! -s "$dir/geoip.dat" ]]; then
-    log_info "دانلود geoip.dat ..."
+    log_info "downloading geoip.dat ..."
     curl -fL --max-time 180 -o "$dir/geoip.dat" "$GEOIP_URL" || ok=0
   fi
   if [[ ! -s "$dir/geosite.dat" ]]; then
-    log_info "دانلود geosite.dat ..."
+    log_info "downloading geosite.dat ..."
     curl -fL --max-time 180 -o "$dir/geosite.dat" "$GEOSITE_URL" || ok=0
   fi
   [[ "$ok" == "1" ]] || { rm -f "$dir/geoip.dat" "$dir/geosite.dat"; return 1; }
@@ -140,9 +140,9 @@ _gen_x25519_openssl() {
   # shellcheck disable=SC2064
   trap "rm -rf '$tmp'" RETURN
   openssl genpkey -algorithm X25519 -outform DER -out "$tmp/priv.der" 2>/dev/null \
-    || fail "ساخت کلید X25519 ناموفق بود (openssl too old?)"
+    || fail "failed to generate an X25519 key (openssl too old?)"
   openssl pkey -inform DER -in "$tmp/priv.der" -pubout -outform DER \
-    -out "$tmp/pub.der" 2>/dev/null || fail "استخراج کلید عمومی ناموفق بود."
+    -out "$tmp/pub.der" 2>/dev/null || fail "failed to derive the public key."
   # PKCS#8 X25519 private key DER = 16 byte header + 32 byte key.
   # SubjectPublicKeyInfo X25519 DER  = 12 byte header + 32 byte key.
   X25519_PRIVATE=$(tail -c 32 "$tmp/priv.der" | _b64url)
@@ -167,14 +167,14 @@ validate_json_file() {
 # binary is missing so the flow is not blocked on a partial install.
 xray_test_config() {
   local f="$1" bin; bin=$(p "$R_XRAY_BIN")
-  [[ -x "$bin" ]] || { log_note "باینری Xray موجود نیست، تست پیکربندی رد شد."; return 0; }
+  [[ -x "$bin" ]] || { log_note "Xray binary missing; skipping the config test."; return 0; }
   if XRAY_LOCATION_ASSET="$(p "$R_XRAY_ASSETS")" \
      "$bin" -test -config "$f" >/tmp/xray-test.$$ 2>&1; then
     rm -f /tmp/xray-test.$$
-    log_ok "تست پیکربندی Xray موفق بود."
+    log_ok "Xray accepted the configuration."
     return 0
   fi
-  log_err "پیکربندی Xray نامعتبر است:"
+  log_err "the Xray configuration is invalid:"
   sed 's/^/      /' /tmp/xray-test.$$ >&2
   rm -f /tmp/xray-test.$$
   return 1

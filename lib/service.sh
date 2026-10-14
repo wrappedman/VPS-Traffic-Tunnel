@@ -31,7 +31,7 @@ SyslogIdentifier=xray
 [Install]
 WantedBy=multi-user.target
 EOF
-  log_ok "واحد systemd ساخته شد: $R_XRAY_SERVICE"
+  log_ok "systemd unit written: $R_XRAY_SERVICE"
 }
 
 write_health_units() {
@@ -59,7 +59,7 @@ AccuracySec=1min
 [Install]
 WantedBy=timers.target
 EOF
-  log_ok "تایمر بررسی سلامت نصب شد (هر ۵ دقیقه)."
+  log_ok "health-check timer installed (every 5 minutes)."
 }
 
 write_cert_timer_units() {
@@ -89,16 +89,16 @@ Persistent=true
 [Install]
 WantedBy=timers.target
 EOF
-  log_ok "تایمر تمدید خودکار گواهی نصب شد (هر ۱۲ ساعت)."
+  log_ok "certificate renewal timer installed (every 12 hours)."
 }
 
 enable_services() {
   sysd daemon-reload || true
   sysd enable xray.service >/dev/null 2>&1 || true
-  sysd restart xray.service || log_warn "سرویس xray شروع نشد؛ لاگ را ببینید: vt logs"
+  sysd restart xray.service || log_warn "xray did not start; check the log with: vt logs"
   sysd enable --now vt-health.timer >/dev/null 2>&1 || true
   sysd enable --now vt-cert-renew.timer >/dev/null 2>&1 || true
-  log_ok "سرویس‌ها فعال شدند و با بوت سیستم بالا می‌آیند."
+  log_ok "services enabled; they will start on boot."
 }
 
 disable_services() {
@@ -180,12 +180,12 @@ show_service_status() {
   local listening="no"
   if [[ -n "${VT_PORT:-}" ]] && port_in_use "${VT_PORT}"; then listening="yes"; fi
 
-  printf '  %-22s %s\n' "وضعیت سرویس:" "$state"
-  printf '  %-22s %s\n' "زمان شروع:" "$uptime"
-  printf '  %-22s %s\n' "پورت در حال شنود:" "$listening (${VT_PORT:-?})"
-  printf '  %-22s %s\n' "نسخه Xray:" "$(xray_installed_version 2>/dev/null || echo '—')"
-  printf '  %-22s %s\n' "حالت:" "${VT_MODE:-?}"
-  printf '  %-22s %s\n' "گواهی:" "$(cert_summary)"
-  printf '  %-22s %s\n' "تمدید خودکار:" "$(cert_renewal_job_active || echo '—')"
-  printf '  %-22s %s\n' "تعداد کاربر:" "$(users_count)"
+  printf '  %-22s %s\n' "Service:" "$state"
+  printf '  %-22s %s\n' "Started:" "$uptime"
+  printf '  %-22s %s\n' "Port listening:" "$listening (${VT_PORT:-?})"
+  printf '  %-22s %s\n' "Xray version:" "$(xray_installed_version 2>/dev/null || echo '—')"
+  printf '  %-22s %s\n' "Mode:" "${VT_MODE:-?}"
+  printf '  %-22s %s\n' "Certificate:" "$(cert_summary)"
+  printf '  %-22s %s\n' "Auto renewal:" "$(cert_renewal_job_active || echo '—')"
+  printf '  %-22s %s\n' "Users:" "$(users_count)"
 }

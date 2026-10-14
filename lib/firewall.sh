@@ -25,14 +25,14 @@ firewall_setup() {
   local extra=("$@")
 
   if ! have ufw; then
-    log_warn "ufw نصب نیست؛ تنظیم فایروال رد شد. (apt-get install ufw)"
+    log_warn "ufw is not installed; skipping firewall setup. (apt-get install ufw)"
     return 0
   fi
   if [[ "$VT_ASSUME_YES" != "1" ]]; then
-    log_warn "فعال‌کردن فایروال می‌تواند دسترسی SSH را قطع کند."
-    log_warn "پورت SSH شناسایی‌شده: ${C_BOLD}${ssh_port}${C_RESET}"
-    if ! confirm "آیا این پورت SSH درست است و فایروال فعال شود؟" y; then
-      log_warn "فایروال تغییر نکرد."
+    log_warn "enabling the firewall can cut off your SSH access."
+    log_warn "detected SSH port: ${C_BOLD}${ssh_port}${C_RESET}"
+    if ! confirm "is that SSH port correct, and should the firewall be enabled?" y; then
+      log_warn "firewall left unchanged."
       return 0
     fi
   fi
@@ -50,8 +50,8 @@ firewall_setup() {
     ufw allow "${port}/tcp" comment 'VT extra' >/dev/null 2>&1 || true
   done
 
-  ufw --force enable >/dev/null 2>&1 || log_warn "فعال‌سازی ufw ناموفق بود."
-  log_ok "فایروال تنظیم شد: SSH=${ssh_port}, tunnel=${tunnel_port}${extra:+, extra=${extra[*]}}"
+  ufw --force enable >/dev/null 2>&1 || log_warn "failed to enable ufw."
+  log_ok "firewall configured: SSH=${ssh_port}, tunnel=${tunnel_port}${extra:+, extra=${extra[*]}}"
 }
 
 firewall_open_port() {
@@ -73,5 +73,5 @@ firewall_remove_vt_rules() {
   for port in "${VT_PORT:-}" "${VT_API_PORT:-}"; do
     [[ -n "$port" ]] && ufw delete allow "${port}/tcp" >/dev/null 2>&1 || true
   done
-  log_note "قوانین فایروال مربوط به تونل حذف شدند."
+  log_note "tunnel firewall rules removed."
 }
