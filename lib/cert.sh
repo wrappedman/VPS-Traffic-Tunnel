@@ -96,7 +96,7 @@ cert_issue_domain() {
     *) fail "unknown certificate method: $method" ;;
   esac
 
-  log_info "issuing a Let's Encrypt certificate for $domain (method: $method) ..."
+  log_info "issuing a Let's Encrypt certificate for $domain (method:$method) ..."
   if [[ "$VT_SKIP_DOWNLOADS" == "1" ]]; then
     log_note "[dry] acme.sh ${cmd[*]}"
     _write_placeholder_cert "$domain"
@@ -142,7 +142,7 @@ cert_issue_ip() {
 _install_cert() {
   local ident="$1" ecc="${2:-}"
   local cert_dir; cert_dir=$(p "$R_CERT_DIR")
-  local reload="systemctl reload-or-restart xray"
+  local reload="systemctl restart xray.service"
   if [[ "$VT_SKIP_DOWNLOADS" == "1" ]]; then
     log_note "[dry] acme.sh --install-cert $ident"
     return 0
@@ -174,8 +174,7 @@ cert_issue_selfsigned() {
 
   local san="subjectAltName="
   if is_ip "$host"; then
-    if [[ "$host" == *:* ]]; then san+="IP:${host}"
-    else san+="IP:${host}"; fi
+    san+="IP:${host}"
   else
     san+="DNS:${host},DNS:www.${host}"
   fi
@@ -196,7 +195,7 @@ ${san}
 subjectKeyIdentifier   = hash
 EOF
 
-  log_info "creating a self-signed certificate for $host (valid ${days} days) ..."
+  log_info "creating a self-signed certificate for $host (valid${days} days) ..."
   openssl req -x509 -new -newkey ec \
     -pkeyopt ec_paramgen_curve:prime256v1 -nodes \
     -keyout "$(key_file)" -out "$(cert_file)" \
@@ -212,7 +211,7 @@ EOF
   VT_TLS_KEY_FILE="$R_KEY_FILE"
   log_ok "self-signed certificate created: $R_CERT_FILE"
   log_warn "clients will not trust a self-signed certificate;"
-  log_warn "the client must enable allowInsecure / "skip certificate verification"."
+  log_warn "the client must enable allowInsecure / \"skip certificate verification\"."
 }
 
 _write_placeholder_cert() {
@@ -253,15 +252,15 @@ cert_renew() {
 # Regenerate the self-signed certificate once it is past half its lifetime.
 _selfsigned_renew_if_old() {
   local f; f=$(cert_file)
-  [[ -f "$f" ]] || { cert_issue_selfsigned "${VT_HOST:-localhost}" 825; return; }
+  [[ -f "$f" ]] \vert{}\vert{} { cert_issue_selfsigned "${VT_HOST:-localhost}" 825; return; }
   local maxage=$(( 825 * 86400 / 2 ))
   local mtime now
-  mtime=$(stat -c %Y "$f" 2>/dev/null || printf '0')
+  mtime=$(stat -c \%Y "$f" 2>/dev/null || printf '0')
   now=$(date +%s)
   if (( now - mtime > maxage )); then
     printf 'self-signed certificate is older than %ss, regenerating\n' "$maxage"
     cert_issue_selfsigned "${VT_HOST:-localhost}" 825
-    sysd reload-or-restart xray || true
+    sysd restart xray.service || true
   else
     printf 'self-signed certificate still fresh (%ss old)\n' "$((now - mtime))"
   fi
@@ -279,7 +278,7 @@ cert_summary() {
   end=$(openssl x509 -in "$f" -noout -enddate 2>/dev/null | sed 's/^notAfter=//')
   if [[ -n "$end" ]]; then
     end_epoch=$(date -d "$end" +%s 2>/dev/null || printf '0')
-    days=$(( (end_epoch - $(date +%s)) / 86400 ))
+    days=$(( (end_epoch -$(date +%s)) / 86400 ))
   else
     days="?"
   fi

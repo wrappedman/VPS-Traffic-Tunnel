@@ -4,13 +4,19 @@
 # vless://<uuid>@<host>:<port>?<params>#<remark>
 share_link() {
   local email="${1:-${VT_EMAIL:-main}}"
-  local uuid remark host port mode
+  local uuid remark host port mode url_host
   uuid=$(users_get_uuid "$email")
-  [[ -n "$uuid" ]] || { log_err "user '$email' not found."; return 1; }
-  remark=$(jq -r --arg e "$email" '.users[] | select(.email==$e) | (.remark // .email)' \
+  [[ -n "$uuid" ]] \vert{}\vert{} { log_err "user '$email' not found."; return 1; }
+  remark=$(jq -r --arg e "$email" '.users[] \vert{} select(.email==$e) | (.remark // .email)' \
             "$(users_file)" 2>/dev/null)
-  [[ -n "$remark" && "$remark" != "null" ]] || remark="$email"
+  [[ -n "$remark" && "$remark" != "null" ]] \vert{}\vert{} remark="$email"
   host="${VT_HOST:?}"; port="${VT_PORT:?}"; mode="${VT_MODE:?}"
+
+  if [[ "$host" == *:* && "$host" != \[*\] ]]; then
+    url_host="[${host}]"
+  else
+    url_host="$host"
+  fi
 
   local -a q=()
   case "$mode" in
@@ -40,7 +46,7 @@ share_link() {
   local IFS='&'
   qs="${q[*]}"
   unset IFS
-  printf 'vless://%s@%s:%s?%s#%s' "$uuid" "$host" "$port" "$qs" "$(urlencode "$remark")"
+  printf 'vless://%s@%s:%s?%s#%s' "$uuid" "$url_host" "$port" "$qs" "$(urlencode "$remark")"
 }
 
 # Print the share link as a QR code in the terminal when qrencode exists.
@@ -88,7 +94,7 @@ print_full_config() {
     reality)
       lines+=("security      : REALITY")
       lines+=("flow          : ${VT_FLOW:-xtls-rprx-vision}")
-      lines+=("sni / public  : ${VT_REALITY_SNI} / ${VT_REALITY_PUBLIC}")
+      lines+=("sni / public  : ${VT_REALITY_SNI} /${VT_REALITY_PUBLIC}")
       lines+=("short id      : ${VT_REALITY_SHORTID}")
       lines+=("fingerprint   : chrome")
       ;;

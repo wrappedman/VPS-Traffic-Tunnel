@@ -18,7 +18,6 @@ CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW CAP_SYS_TIM
 AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW CAP_SYS_TIME
 NoNewPrivileges=true
 ExecStart=$R_XRAY_BIN run -config $R_XRAY_CONF
-ExecReload=/bin/kill -HUP \$MAINPID
 Restart=always
 RestartSec=3
 LimitNOFILE=1048576
@@ -135,7 +134,7 @@ run_health_check() {
       printf '  [ok]   xray service is active\n'
     else
       printf '  [FAIL] xray service is not active — restarting\n'
-      sysd restart xray || true
+      sysd restart xray.service || true
       rc=1
     fi
 
@@ -159,7 +158,7 @@ run_health_check() {
         printf '  [ok]   certificate: %s\n' "$summary"
       fi
     fi
-    printf '  result: %s\n' "$([[ $rc -eq 0 ]] && printf 'healthy' || printf 'DEGRADED')"
+    printf '  result: %s\n' "$([[$rc -eq 0 ]] && printf 'healthy' || printf 'DEGRADED')"
   } >>"$logf" 2>&1
 
   if [[ "$quiet" != "yes" ]]; then

@@ -169,8 +169,14 @@ TXT
     ws-tls|tcp-tls)
       [[ "$new" == "ws-tls" ]] && VT_FLOW="" || VT_FLOW="xtls-rprx-vision"
       [[ -n "${VT_WS_PATH:-}" ]] || VT_WS_PATH="/$(rand_hex 16)/"
+      VT_HOST="${VT_DOMAIN:-${VT_HOST:-${VT_PUBLIC_IP:-$(detect_public_ipv4 || echo 127.0.0.1)}}}"
+      VT_TLS_SNI="$VT_HOST"
       if [[ -z "${VT_TLS_CERT_FILE:-}" || ! -f "$(cert_file)" ]]; then
-        die "this mode needs a TLS certificate first (vt renew-cert, or reinstall)."
+        log_info "no TLS certificate found; generating a self-signed certificate for ${VT_HOST} ..."
+        cert_issue_selfsigned "$VT_HOST" 825 || die "failed to create a certificate."
+        VT_CERT_MODE="selfsigned"
+        VT_SELF_SIGNED="1"
+        VT_REJECT_UNKNOWN_SNI="0"
       fi
       ;;
   esac
@@ -200,10 +206,7 @@ cmd_backup() {
   local stamp; stamp=$(date +%Y%m%d-%H%M%S)
   local out="${dir}/vt-backup-${stamp}.tar.gz"
   mkdir -p "$dir"
-  tar czf "$out" \
-    -C "$(dirname "$(p "$R_ETC")")" "$(basename "$(p "$R_ETC")")" \
-    -C "$(dirname "$(p "$R_XRAY_CONF")")" "$(basename "$(p "$R_XRAY_CONF")")" \
-    2>/dev/null || tar czf "$out" -C "$(dirname "$(p "$R_ETC")")" "$(basename "$(p "$R_ETC")")"
+  tar czf "$out" -C "$(dirname "$(p "$R_ETC")")" "$(basename "$(p "$R_ETC")")"
   chmod 600 "$out"
   log_ok "backup created: $out"
   printf '%s\n' "$out"
@@ -218,6 +221,7 @@ cmd_restore() {
   disable_services
   tar xzf "$file" -C "$(dirname "$(p "$R_ETC")")" || die "restore failed."
   state_load
+  apply_config || log_warn "could not rebuild Xray config from restored state."
   sysd daemon-reload || true
   enable_services
   log_ok "restore complete."
