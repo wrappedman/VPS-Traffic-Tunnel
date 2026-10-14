@@ -53,6 +53,101 @@ sudo vt
 
 ---
 
+## Containers without systemd (Railway, Docker, Fly.io, LXC, WSL)
+
+There is no systemd inside a container, so there is nothing to register a
+service with. The installer notices this, says so, and supervises the tunnel
+itself instead of quietly doing nothing:
+
+```
+[!] no systemd on this machine (container) - running the tunnel as a
+    plain background process instead of a service.
+```
+
+* `vt start` / `vt stop` / `vt restart` start, stop and restart the Xray
+  process directly (pid in `/var/lib/vt/xray.pid`, output in
+  `/var/log/vt/xray.log`). `vt status` shows `Managed by: background process`.
+* `vt logs` reads that log file instead of `journalctl`.
+* `vt health`, `vt restart` and certificate renewal work exactly as on a VPS,
+  so the usual commands keep working.
+
+A plain background process **does not survive a redeploy**: the platform
+throws the container away and starts a new one. Give the platform a start
+command that stays in the foreground, `vt run`:
+
+```bash
+vt run      # supervisor: keeps Xray alive in the foreground
+```
+
+`vt run` starts Xray, restarts it 3 seconds after a crash, and every
+`VT_SUPERVISE_INTERVAL` seconds (default 1800) renews the certificate when one
+is due and logs an `alive:` line. `SIGTERM`/`SIGINT` (what a platform sends
+when it stops the container) shut the child down cleanly. It refuses to start
+twice, and `vt stop` from another shell stops it.
+
+If the platform can build from a git repository (Railway, Fly.io, Docker), use
+the ready-made image instead - it wires all of this up by itself:
+
+```bash
+docker build -f docker/Dockerfile -t vt-tunnel .
+```
+(see *Docker (image included)* below for the run command and the variables).
+
+### Railway
+
+1. Deploy the repository (Railway runs the container as root, which this
+   installer needs).
+2. **Settings → Deploy → Custom Start Command:** `vt run`
+3. Install once — either from the **Railway shell** (`vt install --yes` builds
+   a REALITY + random-port tunnel), or put the exact command you want in the
+   start command, e.g.
+   `vt install --mode reality --port random --email main --sni www.microsoft.com --yes && vt run`
+   (`vt install` exits immediately, keeping everything, when the tunnel is
+   already installed, so this line is safe on every redeploy). Deploying this
+   repository as-is already does the equivalent: `docker/entrypoint.sh` is the
+   image's entrypoint, so Railway needs no start command at all unless you
+   want different install options.
+4. If the image has no persistent volume, `/etc/vt` is recreated on every
+   redeploy; with the command above the tunnel is reinstalled automatically,
+   but **user UUIDs and keys change**. Attach a volume at `/etc/vt` if you
+   want to keep them.
+5. Give the service a public way in: Railway's HTTP proxy only speaks HTTP, so
+   add a **TCP Proxy** (service → *Networking* / *Public Networking*) and set its
+   target port to the tunnel port. Railway sets `$PORT`, and when that variable
+   is present the installer offers it as the default tunnel port, so the target
+   port usually matches out of the box (`vt port <n>` changes it later).
+
+### Docker (image included)
+
+The repository ships `docker/Dockerfile` and `docker/entrypoint.sh`, so there
+is nothing to write:
+
+```bash
+docker build -f docker/Dockerfile -t vt-tunnel .
+docker run -d --name vt --restart unless-stopped -p 24443:24443 \
+  -v vt-etc:/etc/vt vt-tunnel \
+  --mode reality --port 24443 --sni www.microsoft.com
+```
+
+The entrypoint installs the tunnel on the first start (unattended: it adds
+`--yes --firewall no`), keeps an existing installation on the next ones - so
+the REALITY keys and the UUIDs survive a restart - and then `exec`s `vt run`.
+Arguments before `--` go to `vt install`, everything after it to `vt run`:
+
+```bash
+docker run ... vt-tunnel --mode reality --port 24443 -- --interval-anything
+```
+
+Useful variables: `VT_INSTALL_ARGS` / `VT_RUN_ARGS` set the defaults,
+`VT_FORCE_INSTALL=1` rebuilds an existing installation (new keys - every
+client has to be updated).
+
+`--restart unless-stopped` plus the foreground `vt run` is the same always-on
+behaviour `xray.service` gives on a VPS. Mount a volume at `/etc/vt` (as
+above) or the keys are regenerated with every new container.
+
+---
+
 ## Three tunnel modes
 
 ### 1) REALITY — recommended
@@ -167,6 +262,11 @@ sudo vt install --mode ws-tls --domain tunnel.example.com \
 
 Options: `--mode --domain --cert --acme --webroot --dns-plugin --dns-env --dns-token --sni --port --email --email-acme --firewall --adblock --no-torrent --force --yes`
 
+`--yes` never overwrites an existing installation: it prints `already installed`
+and exits 0, so a start command like `vt install ... --yes && vt run` is safe on
+every redeploy. Add `--force` to rebuild (that rotates the REALITY keypair and
+the UUIDs, and every configured client has to be updated).
+
 ### User management
 ```bash
 sudo vt add-user [name]     # new user + share link + QR
@@ -182,6 +282,7 @@ sudo vt rotate-keys         # rotate the REALITY keypair (invalidates all client
 ```bash
 sudo vt status
 sudo vt restart | stop | start
+sudo vt run                 # foreground supervisor (container start command)
 sudo vt logs [xray|error|health|cert|install|follow]
 sudo vt doctor              # automated diagnostics
 sudo vt health              # exactly what the health timer runs
@@ -211,12 +312,17 @@ sudo vt restore <file>      # restore (--force skips the prompt)
 /usr/local/bin/xray                  Xray binary
 /usr/local/share/xray/               geoip.dat / geosite.dat (optional)
 /var/log/vt/                         install, health, cert and Xray error logs
+/var/log/vt/xray.log                 stdout/stderr of the supervised process (no systemd)
+/var/lib/vt/xray.pid                 pid of that process
+/var/lib/vt/vt-run.pid               pid of the `vt run` supervisor
 
 /etc/systemd/system/xray.service
 /etc/systemd/system/vt-health.{service,timer}
 /etc/systemd/system/vt-cert-renew.{service,timer}
 /etc/sysctl.d/99-vt-tunnel.conf
 /etc/logrotate.d/vt-tunnel
+/opt/vt/docker/entrypoint.sh          container entrypoint (installs on first start)
+/opt/vt/docker/Dockerfile             the image itself
 ```
 
 ---
@@ -243,15 +349,17 @@ sudo vt restore <file>      # restore (--force skips the prompt)
 ./tests/run_tests.sh
 ```
 
-Six stages: syntax check, ShellCheck, unit tests, **full dry-run installs for
-all four mode/certificate combinations** inside a throwaway root, Xray config
-schema validation, and uninstall.
+Seven stages: syntax check, a stale-LaTeX-escape guard, ShellCheck, unit
+tests, **full dry-run installs for all four mode/certificate combinations**
+inside a throwaway root, Xray config schema validation, a **container run**
+without systemd (install → start/stop/restart → `vt run` → `vt stop` →
+`docker/entrypoint.sh` → uninstall) and uninstall.
 
 The dry-run works through the `VT_ROOT` variable: every path is prefixed, so
 the real install flow executes end to end without touching the host.
 
 ```
-PASS: 196   FAIL: 0
+PASS: 252   FAIL: 0
 ```
 
 The findings behind the latest round of fixes are written up in
@@ -267,6 +375,8 @@ The findings behind the latest round of fixes are written up in
 | port is open but nothing connects | in REALITY mode, change the camouflage site (`--sni`) |
 | `certificate has expired` | `sudo vt renew-cert`, then `sudo vt logs cert` |
 | the service will not start | `sudo vt logs error` |
+| container: nothing listens after a deploy | use `vt run` as the start command; `vt start` alone dies with the container |
+| container: `vt status` says inactive | `sudo vt start`, then `sudo vt logs` (journald does not exist there) |
 | slow | `sysctl net.ipv4.tcp_congestion_control` should say `bbr` |
 
 More: [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md)

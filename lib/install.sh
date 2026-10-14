@@ -58,7 +58,26 @@ preflight() {
   VT_SSH_PORT="$(detect_ssh_port)"
   log_info "SSH port: $VT_SSH_PORT"
 
+  if [[ ! -f "$(p "$R_XRAY_CONF")" ]] && is_installed; then
+    # Half-broken state: the state file is there but the configuration is not
+    # (an interrupted install, or a container volume mounted at /etc/vt only).
+    # Rebuilding it is what the user wants; nothing is overwritten.
+    log_warn "an install was found but $R_XRAY_CONF is missing - rebuilding it."
+    VT_FORCE=1
+  fi
+
   if [[ -f "$(p "$R_XRAY_CONF")" && "$VT_FORCE" != "1" ]]; then
+    if [[ "$VT_ASSUME_YES" == "1" ]]; then
+      # Unattended run (--yes: container start commands, redeploys, CI). Never
+      # rebuild an existing installation behind the user's back - that would
+      # rotate the REALITY keypair or the certificate and break every client
+      # that is already configured. Exit 0 instead of "cancelled.", so that a
+      # start command like `vt install ... --yes && vt run` starts the tunnel
+      # again on every redeploy instead of failing and restarting the loop.
+      log_ok "already installed - keeping the current configuration."
+      log_note "to rebuild it anyway, add --force."
+      exit 0
+    fi
     if confirm "an existing installation was found. Overwrite the current config?" n; then
       VT_FORCE=1
     else
@@ -303,6 +322,13 @@ wizard_ask_port() {
     ws-tls) def=443 ;;
     *) def="random" ;;
   esac
+  # Container platforms (Railway, Heroku-likes, ...) tell the app which port
+  # their proxy forwards to through $PORT, so prefer that as the default.
+  if [[ -z "$WIZ_PORT" && -n "${PORT:-}" && "$PORT" =~ ^[0-9]+$ ]]; then
+    def="$PORT"
+    log_note "using the port from the environment (\$PORT=$PORT)."
+  fi
+
   local ans="$WIZ_PORT"
   if [[ -z "$ans" ]]; then
     if [[ "$VT_ASSUME_YES" == "1" ]]; then
@@ -354,12 +380,20 @@ wizard_ask_email() {
 # Question 5 — extras
 # --------------------------------------------------------------------------
 wizard_ask_extras() {
+  local fw_default="y"
+  if [[ "$(service_backend)" != "systemd" ]]; then
+    # Inside a container ufw cannot program netfilter and the port mapping is
+    # handled by the platform, so do not pretend to configure a firewall.
+    fw_default="n"
+    log_note "no systemd here (container): the firewall is managed by the platform."
+  fi
+
   if [[ -n "$WIZ_FIREWALL" && "$WIZ_FIREWALL" != "ask" ]]; then
     VT_FIREWALL="$WIZ_FIREWALL"
   elif [[ "$VT_ASSUME_YES" == "1" ]]; then
     VT_FIREWALL="no"
   else
-    if confirm "enable the UFW firewall and open only the required ports? (SSH=${VT_SSH_PORT})" y; then
+    if confirm "enable the UFW firewall and open only the required ports? (SSH=${VT_SSH_PORT})" "$fw_default"; then
       VT_FIREWALL="yes"
     else
       VT_FIREWALL="no"

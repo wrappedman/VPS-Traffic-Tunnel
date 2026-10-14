@@ -1,6 +1,6 @@
 # VPS-Traffic-Tunnel — developer tasks
 SHELLCHECK ?= shellcheck
-SHELL_FILES := vt $(wildcard lib/*.sh) $(wildcard tests/*.sh)
+SHELL_FILES := vt bootstrap.sh $(wildcard lib/*.sh) $(wildcard tests/*.sh) $(wildcard docker/*.sh)
 
 .PHONY: help test lint syntax install uninstall clean
 

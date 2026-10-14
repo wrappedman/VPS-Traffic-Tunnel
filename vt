@@ -120,6 +120,7 @@ case "$CMD" in
 
   status)             cmd_status ;;
   logs)               cmd_logs "${1:-xray}" ;;
+  run|supervise)      cmd_run ;;
   restart)            cmd_restart ;;
   stop)               cmd_stop ;;
   start)              cmd_start ;;

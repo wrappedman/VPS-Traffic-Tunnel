@@ -262,7 +262,7 @@ _selfsigned_renew_if_old() {
   if (( now - mtime > maxage )); then
     printf 'self-signed certificate is older than %ss, regenerating\n' "$maxage"
     cert_issue_selfsigned "${VT_HOST:-localhost}" 825
-    sysd restart xray.service || true
+    service_xray restart || true
   else
     printf 'self-signed certificate still fresh (%ss old)\n' "$((now - mtime))"
   fi
@@ -293,14 +293,25 @@ cert_renewal_job_active() {
     printf 'acme.sh cron'
     return 0
   fi
-  if systemd_running && systemctl list-timers 2>/dev/null | grep -q 'vt-cert-renew'; then
-    printf 'systemd timer'
+  # Timers only tick where systemd runs; a unit file on disk (a container
+  # keeps one after an install, because the installer writes it everywhere)
+  # renews nothing.
+  if systemd_running; then
+    if systemctl list-timers 2>/dev/null | grep -q 'vt-cert-renew'; then
+      printf 'systemd timer'
+      return 0
+    fi
+    if [[ -f "$(p "$R_VT_CERT_TIMER")" ]]; then
+      printf 'systemd timer (unit installed)'
+      return 0
+    fi
+  fi
+  # No systemd: `vt run` performs the periodic renewal itself.
+  if run_supervisor_pid >/dev/null 2>&1; then
+    printf 'vt run supervisor'
     return 0
   fi
-  if [[ -f "$(p "$R_VT_CERT_TIMER")" ]]; then
-    printf 'systemd timer (unit installed)'
-    return 0
-  fi
-  printf 'none'
+  # Nothing found: print nothing and fail, so the callers can print their own
+  # placeholder (the old "none" leaked into `Auto renewal: none—`).
   return 1
 }

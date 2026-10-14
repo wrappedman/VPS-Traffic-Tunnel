@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-14
 **Scope:** every file under `lib/`, the `vt` entry point and the test suite.
-**Verified with:** `./tests/run_tests.sh` -> `PASS: 196   FAIL: 0`, ShellCheck clean.
+**Verified with:** `./tests/run_tests.sh` -> `PASS: 252   FAIL: 0`, ShellCheck clean.
 
 ---
 
@@ -28,6 +28,13 @@
 پیدا شد هم اصلاح شد (فهرست کامل پایین‌تر). برای اینکه این اتفاق دیگر تکرار
 نشود، تست‌هایی اضافه شد که هم escape بودن را تشخیص می‌دهند و هم مطمئن می‌شوند
 هر فایل کتابخانه واقعاً لود شده است.
+
+**دور دوم (کانتینرها):** روی Railway هیچ systemd وجود ندارد، پس `sysd()` فقط
+خط `[dry] systemctl restart xray.service` را چاپ می‌کرد و **هیچ کاری نمی‌کرد**؛
+نصب «موفق» گزارش می‌شد ولی تونل هرگز بالا نمی‌آمد. حالا بدون systemd خودِ
+برنامه پروسه را نگه می‌دارد، دستور `vt run` به‌عنوان Start Command کانتینر
+اضافه شده، و `vt install --yes` روی نصب موجود دست نمی‌برد (تا خط
+`vt install --yes && vt run` در هر ری‌دیپلوی امن باشد). جزئیات در بخش ۶.
 
 ---
 
@@ -110,3 +117,64 @@ pattern so it cannot silently come back.
   upstream Xray documentation for the stats API.
 * `_install_cert` intentionally restarts `xray.service` (a reload is only safe
   for hot-reloadable listeners) and the unit therefore has no `ExecReload`.
+
+---
+
+## 6. Containers: no systemd (Railway, Docker, Fly.io, LXC, WSL)
+
+Reported from a Railway deploy: the panel said the service was stopped, the
+restart printed `[dry] systemctl restart xray.service`, and the check right
+after it said `[✗] the service did not come up.`
+
+**The fault was in the program, not in Railway.** `sysd()` silently fell back
+to printing the `systemctl` line when systemd is unavailable, so *every*
+service action was a no-op: the install reported success while nothing was
+ever started, and `vt start|stop|restart` did nothing at all. The suite never
+caught it because it forces `VT_SKIP_SYSTEMD=1` and therefore exercised the
+same silent path (and it only asserted that the install finished).
+
+### What changed
+
+| Area | Behaviour now |
+|---|---|
+| `lib/service.sh` | `service_backend()` returns `systemd` or `process`. Without systemd, `vt start|stop|restart` supervise the binary directly: pid in `/var/lib/vt/xray.pid`, stdout/stderr in `/var/log/vt/xray.log`, `xray_is_active` falls back to that pid file and then to `pgrep -x xray`. |
+| `vt run` (new) | The container start command. Foreground supervisor: starts `xray run -config ...` with `XRAY_LOCATION_ASSET`, restarts it 3 s after a crash, renews the certificate when due and logs an `alive:` line every `VT_SUPERVISE_INTERVAL` seconds (default 1800), and shuts the child down cleanly on `SIGTERM`/`SIGINT`/`SIGHUP` (`docker stop`). It records its own pid in `/var/lib/vt/vt-run.pid` and refuses to run twice. |
+| `service_xray` | One dispatcher (`start|stop|restart`) used by `lib/cert.sh`, `lib/config_gen.sh`, `lib/service.sh` and `lib/status.sh`; the old `sysd <action> xray.service` call sites are gone, so a container can no longer silently skip a restart. |
+| `xray_stop_process` | Stops a running `vt run` supervisor first (it would otherwise just start a new child), then the child. `$$` is excluded so the supervisor's own health check / renewal never kills its parent. |
+| Process detection | `xray_process_pids`/`_owns_xray_pid` ask `/proc` whether a process really *is* this install's binary (its `exe`, or `argv[1]` for the offline stub, which is a shell script). The old `pkill -x xray` matched by name, so a test run inside a `VT_ROOT` could have killed the host's real tunnel - and `xray_is_active` could report a foreign process as ours. |
+| `xray_restart_process` | When a supervisor is running it only kills the child and lets the supervisor respawn it - starting a second Xray there would race it for the port. |
+| `lib/status.sh` | `vt logs` reads `/var/log/vt/xray.log` where journald does not exist; `vt logs follow` says so instead of running `journalctl`. `doctor` prints `unavailable` instead of `?` for the congestion control on a container. |
+| `cert_renewal_job_active` | Reports `vt run supervisor` without systemd, and no longer claims `systemd timer (unit installed)` on a machine where timers cannot tick. Also stopped printing `none`, which leaked into `Auto renewal: none—`. |
+| `lib/install.sh` | Tunnel port defaults to `$PORT` when the platform sets it; the UFW prompt defaults to *no* (the platform owns port mapping); `vt install --yes` keeps an existing installation and exits 0 instead of dying with `cancelled.` - that is what makes `vt install ... --yes && vt run` a safe start command on every redeploy. |
+| `enable_services` | Warns that a plain background process does not survive a redeploy and points at `vt run`. |
+| `xray_start_process` | On failure it now reports the child's real exit status, and says so when the log is empty (instead of an empty "the last lines of the log say why:"). |
+| `docker/Dockerfile`, `docker/entrypoint.sh` | The image: Debian bookworm plus the tools the program actually calls (`curl jq openssl procps iproute2 python3 socat unzip tar cron`). The entrypoint installs on the first start (adding `--yes --firewall no` itself, never twice), keeps an existing installation on later starts so the keys and UUIDs survive a redeploy, and then `exec`s `vt run`. Arguments before `--` go to the install, after it to `vt run`; `VT_INSTALL_ARGS`, `VT_RUN_ARGS` and `VT_FORCE_INSTALL` (which bypasses the "keep it" branch, not just appends `--force`) are honoured. |
+
+### Tests (`PASS: 196` -> `252`)
+
+A new stage, `6/7 container services (no systemd)`, installs with
+`VT_SKIP_SYSTEMD=1` and the real service layer, then drives it end to end:
+
+* install on a machine without systemd, with the warning and a valid config;
+* a repeated unattended install is a no-op and keeps the keys;
+* `vt start` -> pid file written, `vt status` active, `vt logs`/`vt logs follow`
+  behave; `vt stop` -> inactive; `vt restart` -> active again;
+* `vt health` restarts a dead tunnel and the tunnel is up afterwards;
+* `vt run` starts the child in the foreground and stops it on `SIGTERM`;
+* a background supervisor is visible in `vt status`, `vt stop` shuts the
+  supervisor (not just the child) down, a second `vt run` refuses to start, and
+  a configuration change (`add-user`) defers to the running supervisor instead
+  of racing it for the port;
+* uninstall still removes everything.
+
+And `docker/entrypoint.sh` is driven directly (no Docker needed - it honours
+`VT_ROOT`/`VT_BIN`): first start installs and execs the supervisor, a second
+start keeps the install and its keys, `VT_FORCE_INSTALL=1` rebuilds with the
+options from the command line, anything after `--` reaches `vt run`, a
+half-written install (state without config) is repaired, and an install that
+fails does not leave a supervisor running behind it - the bug this test found
+in the first draft of the entrypoint.
+
+Unit tests also assert `service_backend`, `run_supervisor_pid` (missing / stale
+/ garbage / live pid file) and that `cmd_run` and the rest of the service layer
+are actually defined after sourcing.

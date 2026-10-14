@@ -17,6 +17,8 @@ eq()  { if [[ "$2" == "$3" ]]; then ok "$1"; else bad "$1" "expected [$2] got [$
 VT_ROOT=$(mktemp -d)
 export VT_ROOT
 export VT_ASSUME_YES=1 VT_NO_COLOR=1 VT_SKIP_DOWNLOADS=1 VT_SKIP_APT=1 VT_SKIP_SYSTEMD=1
+# Never start or stop anything from the unit tests.
+export VT_SKIP_SERVICE=1
 mkdir -p "$VT_ROOT"
 # shellcheck disable=SC2064
 trap 'rm -rf "$VT_ROOT"' EXIT
@@ -335,6 +337,43 @@ else
   bad "cert_issue_selfsigned domain" "openssl failed"
 fi
 
+# --- state file round-trip ------------------------------------------------
+# The LaTeX-escape bug wrote a stray backslash before the printf placeholder
+# instead of the value; make sure characters a formatter likes to escape
+# survive verbatim.
+VT_TLS_SNI="a%b&c_d-e"; state_save
+eq "state keeps % & _ in a value" "a%b&c_d-e" "$(state_load >/dev/null; state_get TLS_SNI)"
+grep -q '^TLS_SNI="a%b&c_d-e"$' "$VT_ROOT$R_STATE" \
+  && ok "state file is not escaped on disk" \
+  || bad "state file is not escaped on disk" "$(grep '^TLS_SNI=' "$VT_ROOT$R_STATE")"
+VT_TLS_SNI=""
+
+# --- container service backend --------------------------------------------
+# Without systemd the tunnel is supervised by vt itself; every service call
+# must go to the process backend instead of becoming a systemctl no-op.
+eq "service_backend is process without systemd" "process" "$(service_backend)"
+if run_supervisor_pid >/dev/null 2>&1; then
+  bad "run_supervisor_pid fails without a pid file" "it returned 0"
+else
+  ok "run_supervisor_pid fails without a pid file"
+fi
+mkdir -p "$VT_ROOT$R_LIB"
+printf '%s\n' "999999" >"$VT_ROOT$R_RUN_PID"
+if run_supervisor_pid >/dev/null 2>&1; then
+  bad "run_supervisor_pid ignores a stale pid" "it returned 0"
+else
+  ok "run_supervisor_pid ignores a stale pid"
+fi
+printf '%s\n' "$$" >"$VT_ROOT$R_RUN_PID"
+eq "run_supervisor_pid reads a live pid" "$$" "$(run_supervisor_pid)"
+printf '%s\n' "not-a-pid" >"$VT_ROOT$R_RUN_PID"
+if run_supervisor_pid >/dev/null 2>&1; then
+  bad "run_supervisor_pid ignores garbage" "it returned 0"
+else
+  ok "run_supervisor_pid ignores garbage"
+fi
+rm -f "$VT_ROOT$R_RUN_PID"
+
 # --- every library must actually load -------------------------------------
 # A syntax error anywhere in a sourced file makes the shell abandon that file
 # entirely, so all of its functions stay undefined and the caller only notices
@@ -362,6 +401,8 @@ for fn in \
   firewall_remove_vt_rules \
   write_xray_unit write_health_units write_cert_timer_units enable_services \
   disable_services xray_is_active run_health_check show_service_status \
+  service_backend service_xray xray_pid xray_start_process xray_stop_process \
+  xray_restart_process run_supervisor_pid cmd_run \
   cmd_uninstall \
   cmd_status cmd_view_config cmd_logs cmd_restart cmd_stop cmd_start \
   cmd_change_port cmd_renew_cert cmd_update cmd_switch_mode cmd_rotate_keys \
