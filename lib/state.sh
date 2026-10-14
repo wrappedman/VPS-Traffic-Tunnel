@@ -13,8 +13,8 @@ state_load() {
     key="${BASH_REMATCH[1]}"
     val="${BASH_REMATCH[2]}"
     # strip surrounding quotes
-    val="${val\%\"}"; val="${val#\"}"
-    printf -v "VT_${key}" '\%s' "$val"
+    val="${val%\"}"; val="${val#\"}"
+    printf -v "VT_${key}" '%s' "$val"
   done <"$f"
   export VT_STATE_LOADED=1
 }
@@ -46,7 +46,7 @@ _STATE_KEYS=(
   INSTALLED_AT XRAY_VERSION FLOW SELF_SIGNED
 )
 
-state_get() { local v="VT_$1"; printf '\%s' "${!v-}"; }
+state_get() { local v="VT_$1"; printf '%s' "${!v-}"; }
 
 is_installed() {
   local f; f=$(p "$R_STATE")
@@ -111,7 +111,7 @@ users_remove() {
   [[ -n "$email" ]] || return 1
   [[ -f "$f" ]] || return 1
   tmp=$(mktemp)
-  if jq --arg e "$email" '.users \vert{}= map(select(.email != $e))' "$f" >"$tmp" 2>/dev/null; then
+  if jq --arg e "$email" '.users |= map(select(.email != $e))' "$f" >"$tmp" 2>/dev/null; then
     cat "$tmp" >"$f"
     rm -f "$tmp"
     return 0
@@ -125,7 +125,7 @@ users_get_uuid() {
   local email="$1" f; f=$(users_file)
   [[ -n "$email" ]] || return 1
   [[ -f "$f" ]] || return 1
-  jq -r --arg e "$email" '.users[] | select(.email==$e) \vert{} .uuid' "$f" 2>/dev/null
+  jq -r --arg e "$email" '.users[] | select(.email==$e) | .uuid' "$f" 2>/dev/null
 }
 
 users_list_emails() {

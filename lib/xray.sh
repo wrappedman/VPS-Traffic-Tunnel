@@ -121,8 +121,9 @@ gen_x25519() {
     local out
     out=$("$bin" x25519 2>/dev/null) || out=""
     local priv pub
-    # Support both legacy ("Private key:" / "Public key:") and modern
-    # ("PrivateKey:" / "Password:") Xray-core CLI output formats.
+    # Support both the legacy ("Private key:" / "Public key:") and the current
+    # ("PrivateKey:" / "Password (PublicKey):" / "Hash32:") CLI output, so key
+    # generation does not silently fall back to OpenSSL on new Xray releases.
     priv=$(awk -F': *' '/^[Pp]rivate ?[Kk]ey/ {print $2}' <<<"$out" | tr -d '[:space:]')
     pub=$(awk -F': *' '/^([Pp]ublic ?[Kk]ey|[Pp]assword)/ {print $2}' <<<"$out" | tr -d '[:space:]')
     if [[ -n "$priv" && -n "$pub" ]]; then

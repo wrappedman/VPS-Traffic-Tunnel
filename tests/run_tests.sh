@@ -64,6 +64,21 @@ for f in "$REPO/vt" "$REPO"/lib/*.sh "$REPO"/tests/*.sh; do
 done
 (( SYNTAX_BAD == 0 )) && ok "bash -n on all shell files"
 
+# A hand-edit of these sources once went through a formatter that escaped the
+# shell metacharacters LaTeX-style: the pipe character was spelled out as a
+# control sequence and a backslash was inserted before the percent sign.
+# That is *valid* bash for printf (it just prints the text literally) and
+# valid jq nowhere, so it broke the installer in ways `bash -n` cannot see.
+# The backslash is written as the character class [\\] so this check never
+# matches its own pattern.
+LATEX_HITS=$(grep -rnE '[\\](vert|%s|%Y|[_&{}])' \
+  "$REPO/vt" "$REPO"/lib/*.sh "$REPO"/tests/*.sh 2>/dev/null || true)
+if [[ -z "$LATEX_HITS" ]]; then
+  ok "no LaTeX-style escaping in the sources"
+else
+  bad "no LaTeX-style escaping in the sources" "$(head -n 5 <<<"$LATEX_HITS")"
+fi
+
 # --------------------------------------------------------------------------
 sect "2/6 shellcheck"
 # --------------------------------------------------------------------------

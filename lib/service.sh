@@ -158,7 +158,7 @@ run_health_check() {
         printf '  [ok]   certificate: %s\n' "$summary"
       fi
     fi
-    printf '  result: %s\n' "$([[$rc -eq 0 ]] && printf 'healthy' || printf 'DEGRADED')"
+    printf '  result: %s\n' "$([[ $rc -eq 0 ]] && printf 'healthy' || printf 'DEGRADED')"
   } >>"$logf" 2>&1
 
   if [[ "$quiet" != "yes" ]]; then

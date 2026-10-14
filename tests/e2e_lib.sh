@@ -4,8 +4,13 @@
 
 _e2e_env() {
   # usage: _e2e_env <VT_ROOT> <command> [args...]
+  #
+  # run_tests.sh re-executes itself with sudo when it is not already root, so
+  # by the time we get here we are root and a plain `env` is enough. Going
+  # through sudo would needlessly require sudo to be installed on a box where
+  # the suite already runs as root.
   local root="$1"; shift
-  sudo env \
+  env \
     VT_ROOT="$root" \
     VT_ASSUME_YES=1 \
     VT_SKIP_DOWNLOADS=1 \
@@ -174,6 +179,57 @@ e2e_case() {
     ok "$name: renew-cert runs"
   else
     bad "$name: renew-cert runs" "$(tail -n 15 "$root/install.out")"
+  fi
+
+  # vt-cert-renew.service and vt-health.service call `vt ... --quiet` from
+  # systemd, so those invocations must not print anything to stdout/stderr.
+  local quiet_out
+  quiet_out=$(_e2e_env "$root" "$REPO/vt" renew-cert --quiet 2>&1) || true
+  if [[ -z "$quiet_out" ]]; then
+    ok "$name: renew-cert --quiet is silent"
+  else
+    bad "$name: renew-cert --quiet is silent" "$quiet_out"
+  fi
+  quiet_out=$(_e2e_env "$root" "$REPO/vt" health --quiet 2>&1) || true
+  if [[ -z "$quiet_out" ]]; then
+    ok "$name: health --quiet is silent"
+  else
+    bad "$name: health --quiet is silent" "$quiet_out"
+  fi
+
+  # ---- backup / restore -------------------------------------------------
+  # `vt backup` used to write the tarball into the very directory it was
+  # archiving, and `vt restore` answered its own prompt with "no" whenever
+  # VT_ASSUME_YES was set, so an unattended restore silently did nothing.
+  local bk
+  # Mark the state file *before* the backup so the restore has something to
+  # bring back that the installer itself would not recreate.
+  grep -q '^REVIEW_MARKER=' "$etc/vt.env" 2>/dev/null \
+    || printf 'REVIEW_MARKER="1"\n' >>"$etc/vt.env"
+  if bk=$(_e2e_env "$root" "$REPO/vt" backup 2>>"$root/install.out" | tail -n1) \
+     && [[ -f "$bk" ]]; then
+    ok "$name: backup creates an archive"
+    if tar tzf "$bk" >/dev/null 2>&1; then
+      ok "$name: the archive is not corrupt"
+    else
+      bad "$name: the archive is not corrupt" "tar tzf $bk failed"
+    fi
+    if tar tzf "$bk" | grep -q '^etc/vt/'; then
+      ok "$name: the archive keeps rooted member names"
+    else
+      bad "$name: the archive keeps rooted member names" "$(tar tzf "$bk" | head -5)"
+    fi
+    # Wipe what the backup holds, restore, and check it all came back.
+    rm -f "$conf" "$etc/vt.env"
+    if _e2e_env "$root" "$REPO/vt" restore "$bk" --force >>"$root/install.out" 2>&1; then
+      assert_contains "$name: restore brings the state file back" "$(cat "$etc/vt.env")" "REVIEW_MARKER="
+      assert_file "$name: restore rebuilds the xray config" "$conf"
+    else
+      bad "$name: restore" "$(tail -n 15 "$root/install.out")"
+    fi
+    rm -f "$bk" "$etc/vt.env.bak"
+  else
+    bad "$name: backup creates an archive" "$(tail -n 15 "$root/install.out")"
   fi
 
   # Second run over the same root must be refused politely, not crash.

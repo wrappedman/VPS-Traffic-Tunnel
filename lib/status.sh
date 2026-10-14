@@ -105,15 +105,14 @@ cmd_change_port() {
 }
 
 cmd_renew_cert() {
-  local quiet="no"
-  [[ "${1:-}" == "--quiet" ]] && quiet="yes"
+  local quiet; quiet=$(_quiet_flag "${1:-}")
   if [[ "${VT_CERT_MODE:-none}" == "none" ]]; then
     if [[ "$quiet" != "yes" ]]; then
       log_info "this install uses REALITY and has no TLS certificate."
     fi
     return 0
   fi
-  cert_renew
+  cert_renew "$quiet"
   if [[ "$quiet" != "yes" ]]; then
     log_info "certificate status: $(cert_summary)"
   fi
@@ -201,25 +200,40 @@ cmd_rotate_keys() {
   print_full_config yes
 }
 
+# The archive stores $R_ETC under its rooted name ("etc/vt/...") and lives
+# outside the tree it backs up: a tarball that contains itself is not a backup.
 cmd_backup() {
-  local dir="${1:-$(p "$R_ETC")/backup}"
+  local dir="${1:-$(p "$R_LIB")/backup}"
   local stamp; stamp=$(date +%Y%m%d-%H%M%S)
   local out="${dir}/vt-backup-${stamp}.tar.gz"
+  local base="${VT_ROOT%/}"
+  [[ -e "$base$R_ETC" ]] || die "nothing to back up: $R_ETC is missing."
   mkdir -p "$dir"
-  tar czf "$out" -C "$(dirname "$(p "$R_ETC")")" "$(basename "$(p "$R_ETC")")"
+  # Build the archive in a scratch directory first, then move it into place,
+  # so a destination inside /etc/vt can never end up inside the archive.
+  local tmp; tmp=$(mktemp -d)
+  # shellcheck disable=SC2064
+  trap "rm -rf '$tmp'" RETURN
+  tar czf "$tmp/vt-backup.tar.gz" -C "$base" "${R_ETC#/}" || die "backup failed."
+  mv -f "$tmp/vt-backup.tar.gz" "$out" || die "could not write $out"
   chmod 600 "$out"
   log_ok "backup created: $out"
   printf '%s\n' "$out"
 }
 
+# cmd_restore <file> — --force (or VT_FORCE=1) skips the confirmation so an
+# unattended restore cannot be answered with the default "no".
 cmd_restore() {
   local file="$1"
+  local base="${VT_ROOT%/}"
+  [[ -n "$file" ]] || die "usage: vt restore <file> [--force]"
   [[ -f "$file" ]] || die "file not found: $file"
-  if ! confirm "restore from $file - current settings will be overwritten. Continue?" n; then
+  if [[ "$VT_FORCE" != "1" ]] \
+     && ! confirm "restore from $file - current settings will be overwritten. Continue?" n; then
     return 0
   fi
   disable_services
-  tar xzf "$file" -C "$(dirname "$(p "$R_ETC")")" || die "restore failed."
+  tar xzf "$file" -C "$base" || die "restore failed."
   state_load
   apply_config || log_warn "could not rebuild Xray config from restored state."
   sysd daemon-reload || true

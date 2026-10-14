@@ -78,11 +78,11 @@ _api_stat() {
   local name="$1" bin; bin=$(p "$R_XRAY_BIN")
   [[ -x "$bin" ]] || return 1
   [[ -n "${VT_API_PORT:-}" ]] || return 1
-  
+
   local raw
   raw=$("$bin" api stats --server="127.0.0.1:${VT_API_PORT}" -name "$name" -reset 2>/dev/null)
-  if have jq; then
-    # Try parsing as JSON if Xray outputs JSON format
+  if [[ -n "$raw" ]] && have jq; then
+    # Modern Xray prints JSON ({"stat":{"name":...,"value":...}}).
     local val
     val=$(jq -r '.stat.value // .value // empty' <<<"$raw" 2>/dev/null)
     if [[ -n "$val" && "$val" != "null" ]]; then
@@ -90,8 +90,10 @@ _api_stat() {
       return 0
     fi
   fi
-  # Fallback to awk matching for text output (case-insensitive)
-  awk 'IGNORECASE=1; /value:/ {print $2}' <<<"$raw" | head -n1
+  # Older builds print plain text ("Value: 1234"); match it case-insensitively.
+  # NB: no gawk-only IGNORECASE here — Ubuntu ships mawk, where a leading
+  # `IGNORECASE=1;` would be read as a pattern and printed for every line.
+  awk 'tolower($0) ~ /value:/ {print $2; exit}' <<<"$raw"
 }
 
 cmd_stats() {

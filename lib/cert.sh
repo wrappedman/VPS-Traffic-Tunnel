@@ -195,7 +195,7 @@ ${san}
 subjectKeyIdentifier   = hash
 EOF
 
-  log_info "creating a self-signed certificate for $host (valid${days} days) ..."
+  log_info "creating a self-signed certificate for $host (valid ${days} days) ..."
   openssl req -x509 -new -newkey ec \
     -pkeyopt ec_paramgen_curve:prime256v1 -nodes \
     -keyout "$(key_file)" -out "$(cert_file)" \
@@ -221,7 +221,9 @@ _write_placeholder_cert() {
 # --------------------------------------------------------------------------
 # Renewal (invoked by vt-cert-renew.timer and by `vt renew-cert`)
 # --------------------------------------------------------------------------
+# cert_renew [quiet: yes|no] — "yes" keeps stdout empty for systemd units.
 cert_renew() {
+  local quiet; quiet=$(_quiet_flag "${1:-}")
   local mode="${VT_CERT_MODE:-none}"
   local logf; logf="$(p "$R_LOG")/cert-renew.log"
   mkdir -p "$(dirname "$logf")"
@@ -246,16 +248,16 @@ cert_renew() {
         ;;
     esac
   } >>"$logf" 2>&1
-  log_ok "certificate renewal check done (log: $R_LOG/cert-renew.log)"
+  [[ "$quiet" == "yes" ]] || log_ok "certificate renewal check done (log: $R_LOG/cert-renew.log)"
 }
 
 # Regenerate the self-signed certificate once it is past half its lifetime.
 _selfsigned_renew_if_old() {
   local f; f=$(cert_file)
-  [[ -f "$f" ]] \vert{}\vert{} { cert_issue_selfsigned "${VT_HOST:-localhost}" 825; return; }
+  [[ -f "$f" ]] || { cert_issue_selfsigned "${VT_HOST:-localhost}" 825; return; }
   local maxage=$(( 825 * 86400 / 2 ))
   local mtime now
-  mtime=$(stat -c \%Y "$f" 2>/dev/null || printf '0')
+  mtime=$(stat -c %Y "$f" 2>/dev/null || printf '0')
   now=$(date +%s)
   if (( now - mtime > maxage )); then
     printf 'self-signed certificate is older than %ss, regenerating\n' "$maxage"

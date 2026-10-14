@@ -40,8 +40,13 @@ preflight() {
   local_ip=$(local_primary_ipv4); local_ip="${local_ip:-127.0.0.1}"
   pub_ip=$(detect_public_ipv4) || pub_ip=""
   if [[ -z "$pub_ip" ]]; then
-    log_warn "could not detect the public IP; falling back to the local address."
-    pub_ip="$local_ip"
+    # Everything the client config needs (the share link, VT_HOST) is built
+    # from this address, so on a NATed box a wrong guess breaks the tunnel.
+    log_warn "could not detect the public IP automatically."
+    if [[ "$VT_ASSUME_YES" != "1" ]]; then
+      ask pub_ip "public IP (or hostname) your clients should connect to" "$local_ip"
+    fi
+    pub_ip="${pub_ip:-$local_ip}"
   fi
   log_info "local IP:  $local_ip"
   log_info "public IP: $pub_ip"
@@ -142,7 +147,10 @@ TXT
   local def=1
   if [[ -n "$WIZ_MODE" ]]; then
     case "$WIZ_MODE" in
-      reality) def=1 ;; ws-tls) def=2 ;; tcp-tls) def=3 ;;
+      reality) def=1 ;;
+      ws-tls)  def=2 ;;
+      tcp-tls) def=3 ;;
+      *) die "unknown --mode: $WIZ_MODE (expected reality, ws-tls or tcp-tls)" ;;
     esac
   fi
   local idx
@@ -205,7 +213,10 @@ TXT
 wizard_ask_cert() {
   local cert=""
   if [[ -n "$WIZ_CERT" ]]; then
-    cert="$WIZ_CERT"
+    case "$WIZ_CERT" in
+      none|selfsigned|letsencrypt-domain|letsencrypt-ip) cert="$WIZ_CERT" ;;
+      *) die "unknown --cert: $WIZ_CERT (expected none, selfsigned, letsencrypt-domain or letsencrypt-ip)" ;;
+    esac
   elif [[ -n "$WIZ_DOMAIN" ]]; then
     cert="letsencrypt-domain"
   else
@@ -474,6 +485,7 @@ STUB
     fi
     firewall_setup "$VT_SSH_PORT" "$VT_PORT" "${extra[@]}"
   fi
+  warn_about_cloud_firewall "$VT_PORT"
 
   # Make sure the tunnel really came up before we hand over the config.
   sleep 2
@@ -483,7 +495,8 @@ STUB
     log_warn "the service did not come up - check the log with: vt logs"
   fi
 
-  write_client_config "$VT_EMAIL" "$(p "$R_ETC")/client.json" >/dev/null || true
+  write_client_config "$VT_EMAIL" "$(p "$R_ETC")/client.json" >/dev/null \
+    || log_warn "could not write the desktop client config to $R_ETC/client.json."
 
   # vt-health.timer and vt-cert-renew.timer call /opt/vt/vt, so the program
   # must actually live there.

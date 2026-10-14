@@ -23,11 +23,14 @@ BANNER
       log_info "cancelled."
       return 0
     fi
-    local keep="y"
-    if confirm "also delete ${R_ETC} (certificates, users, state)?" n; then
-      keep="n"
+    # --purge already answered this question; do not ask (or overwrite) it.
+    if [[ -z "${VT_UNINSTALL_KEEP_ETC:-}" ]]; then
+      local keep="y"
+      if confirm "also delete ${R_ETC} (certificates, users, state)?" n; then
+        keep="n"
+      fi
+      VT_UNINSTALL_KEEP_ETC="$keep"
     fi
-    VT_UNINSTALL_KEEP_ETC="$keep"
   fi
   VT_UNINSTALL_KEEP_ETC="${VT_UNINSTALL_KEEP_ETC:-y}"
 

@@ -197,7 +197,7 @@ ${C_BOLD}service:${C_RESET}
   status                     restart | stop | start
   logs [xray|error|health|cert|install|follow]
   doctor                     health [--quiet]
-  backup [dir]               restore <file>
+  backup [dir]               restore <file> [--force]
   self-install               install the program itself into ${R_INSTALL_DIR}
 
 ${C_BOLD}environment variables:${C_RESET}

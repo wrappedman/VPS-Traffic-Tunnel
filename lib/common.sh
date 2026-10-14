@@ -96,6 +96,16 @@ fail() {
 # --------------------------------------------------------------------------
 have() { command -v "$1" >/dev/null 2>&1; }
 
+# Normalise the "--quiet" style flag the systemd units pass to `vt`.
+# Echoes "yes" for --quiet/-q/quiet (and for an already-normalised yes), and
+# "no" otherwise, including for an empty argument.
+_quiet_flag() {
+  case "${1:-}" in
+    --quiet|-q|quiet|yes|1|true) printf 'yes' ;;
+    *)                           printf 'no'  ;;
+  esac
+}
+
 is_root() { [[ "$(id -u)" -eq 0 ]]; }
 
 require_root() {
@@ -295,19 +305,25 @@ install_pkgs() {
 # --------------------------------------------------------------------------
 box() {
   # box "title" "line1" "line2" ...
+  #
+  # The frame is sized to the longest line (capped at 76 columns). Lines that
+  # would still be wider than the frame are shortened with "..." so the right
+  # border never drifts: long values (share links) belong *outside* the box.
   local title="$1"; shift
-  local longest=${#title} l
+  local width=${#title} l
   for l in "$@"; do
-    (( ${#l} > longest )) && longest=${#l}
+    (( ${#l} > width )) && width=${#l}
   done
-  (( longest > 76 )) && longest=76
+  (( width > 76 )) && width=76
+  (( width < 8 )) && width=8
   local bar
-  bar=$(printf '─%.0s' $(seq 1 $((longest + 2))))
+  bar=$(printf '─%.0s' $(seq 1 $((width + 2))))
   printf '%s\n' "${C_CYAN}┌${bar}┐${C_RESET}"
-  printf '%s\n' "${C_CYAN}│${C_RESET} ${C_BOLD}${title}$(printf '%*s' $((longest - ${#title})) '') ${C_CYAN}│${C_RESET}"
-  printf '%s\n' "${C_CYAN}├${bar}┼${C_RESET}"
+  printf '%s\n' "${C_CYAN}│${C_RESET} ${C_BOLD}${title}${C_RESET}$(printf '%*s' $((width - ${#title})) '') ${C_CYAN}│${C_RESET}"
+  printf '%s\n' "${C_CYAN}├${bar}┤${C_RESET}"
   for l in "$@"; do
-    printf '%s\n' "${C_CYAN}│${C_RESET} $l$(printf '%*s' $((longest - ${#l})) '') ${C_CYAN}│${C_RESET}"
+    (( ${#l} > width )) && l="${l:0:width-3}..."
+    printf '%s\n' "${C_CYAN}│${C_RESET} ${l}$(printf '%*s' $((width - ${#l})) '') ${C_CYAN}│${C_RESET}"
   done
   printf '%s\n' "${C_CYAN}└${bar}┘${C_RESET}"
 }

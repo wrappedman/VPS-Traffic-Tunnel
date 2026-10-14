@@ -191,7 +191,7 @@ sudo vt selfsigned-cert     # create a fresh self-signed certificate
 sudo vt port <n|random>     # change the port
 sudo vt switch-mode         # change the tunnel mode
 sudo vt backup [dir]        # create a backup
-sudo vt restore <file>      # restore
+sudo vt restore <file>      # restore (--force skips the prompt)
 ```
 
 ---
@@ -251,8 +251,11 @@ The dry-run works through the `VT_ROOT` variable: every path is prefixed, so
 the real install flow executes end to end without touching the host.
 
 ```
-PASS: 167   FAIL: 0
+PASS: 196   FAIL: 0
 ```
+
+The findings behind the latest round of fixes are written up in
+[`docs/CODE-REVIEW.md`](docs/CODE-REVIEW.md).
 
 ---
 

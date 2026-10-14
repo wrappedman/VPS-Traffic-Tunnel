@@ -174,7 +174,7 @@ _stream_reality() {
           "minClientVer": "",
           "maxClientVer": "",
           "maxTimeDiff": 0,
-          "shortIds": ["", "$shortid"]
+          "shortIds": ["$shortid"]
         }
       }
 EOF
@@ -307,6 +307,7 @@ build_client_config() {
       stream_json=$(_client_stream_ws "$insecure")
       ;;
   esac
+  [[ -n "$user_json" && -n "$stream_json" ]] || fail "unknown mode: $mode"
 
   cat >"$out" <<EOF
 {

@@ -123,7 +123,7 @@ case "$CMD" in
   restart)            cmd_restart ;;
   stop)               cmd_stop ;;
   start)              cmd_start ;;
-  health)             run_health_check "${1:-no}" ;;
+  health)             run_health_check "$(_quiet_flag "${1:-}")" ;;
   doctor)             cmd_doctor ;;
 
   add-user)           cmd_add_user "${1:-}" ;;
@@ -139,7 +139,16 @@ case "$CMD" in
   renew-cert)         cmd_renew_cert "${1:-}" ;;
   selfsigned-cert)    _selfsigned_now ;;
   backup)             cmd_backup "${1:-}" ;;
-  restore)            cmd_restore "${1:-}" ;;
+  restore)
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --force)      VT_FORCE=1; shift ;;
+        --yes|-y)     VT_ASSUME_YES=1; shift ;;
+        *)            RESTORE_FILE="$1"; shift ;;
+      esac
+    done
+    cmd_restore "${RESTORE_FILE:-}"
+    ;;
   self-install)       cmd_self_install ;;
 
   version|-v|--version) printf '%s %s\n' "$VT_PROJECT" "$VT_VERSION" ;;

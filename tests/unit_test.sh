@@ -37,6 +37,18 @@ trap 'rm -rf "$VT_ROOT"' EXIT
 . "$REPO/lib/client_gen.sh"
 # shellcheck source=/dev/null
 . "$REPO/lib/users.sh"
+# shellcheck source=/dev/null
+. "$REPO/lib/sysprep.sh"
+# shellcheck source=/dev/null
+. "$REPO/lib/firewall.sh"
+# shellcheck source=/dev/null
+. "$REPO/lib/service.sh"
+# shellcheck source=/dev/null
+. "$REPO/lib/uninstall.sh"
+# shellcheck source=/dev/null
+. "$REPO/lib/status.sh"
+# shellcheck source=/dev/null
+. "$REPO/lib/menu.sh"
 
 # --- path prefixing -------------------------------------------------------
 eq "p() prefixes with VT_ROOT" "$VT_ROOT/etc/vt" "$(p "$R_ETC")"
@@ -44,6 +56,34 @@ VT_ROOT_SAVE="$VT_ROOT"
 VT_ROOT=""
 eq "p() is identity when VT_ROOT empty" "/etc/vt" "$(p "$R_ETC")"
 VT_ROOT="$VT_ROOT_SAVE"
+
+# --- --quiet handling -----------------------------------------------------
+# The systemd units call `vt health --quiet` / `vt renew-cert --quiet`; a
+# missing space anywhere in that path used to be silently ignored.
+eq "_quiet_flag --quiet"     "yes" "$(_quiet_flag --quiet)"
+eq "_quiet_flag -q"          "yes" "$(_quiet_flag -q)"
+eq "_quiet_flag quiet"       "yes" "$(_quiet_flag quiet)"
+eq "_quiet_flag yes"         "yes" "$(_quiet_flag yes)"
+eq "_quiet_flag (empty arg)" "no"  "$(_quiet_flag '')"
+eq "_quiet_flag (no arg)"    "no"  "$(_quiet_flag)"
+eq "_quiet_flag junk"        "no"  "$(_quiet_flag --verbose)"
+
+# --- the ASCII box --------------------------------------------------------
+# Regression: a line wider than the frame used to push the right border out,
+# so `vt viewconfig` printed a broken box whenever a value was long (the
+# share link is printed outside the box for exactly that reason).
+boxout=$(box "title" "short" \
+  "a line that is deliberately much longer than the seventy-six column frame ....................")
+# python counts characters (its len() is UTF-8 aware), which is what the
+# terminal shows; awk's length() would count the frame glyphs as 3 bytes each.
+eq "box keeps every line the same width" "1" \
+  "$(printf '%s\n' "$boxout" | python3 -c 'import sys; print(len({len(l.rstrip(chr(10))) for l in sys.stdin}))')"
+eq "box never exceeds 80 columns" "80" \
+  "$(printf '%s\n' "$boxout" | python3 -c 'import sys; print(max(len(l.rstrip(chr(10))) for l in sys.stdin))')"
+case "$boxout" in
+  *"..."*) ok "box truncates over-long lines" ;;
+  *)       bad "box truncates over-long lines" "no ellipsis in the rendered box" ;;
+esac
 
 # --- urlencode ------------------------------------------------------------
 eq "urlencode plain"        "abcXYZ019._-"  "$(urlencode 'abcXYZ019._-')"
@@ -166,6 +206,31 @@ eq "fmt_bytes 0"     "0 B"      "$(fmt_bytes 0)"
 eq "fmt_bytes 1024"  "1.00 KB"  "$(fmt_bytes 1024)"
 eq "fmt_bytes 5MB"   "5.00 MB"  "$(fmt_bytes 5242880)"
 
+# --- traffic counters -----------------------------------------------------
+# `_api_stat` has to cope with the current JSON output *and* with the legacy
+# "Value: N" text output, on any awk. Ubuntu/Debian ship mawk, where a leading
+# `IGNORECASE=1;` is a *pattern* (not a setting) and prints every input line,
+# so `vt stats` used to report 0 B for every user.
+FAKE_XRAY="$VT_ROOT/usr/local/bin/xray"
+mkdir -p "$(dirname "$FAKE_XRAY")"
+cat >"$FAKE_XRAY" <<'FAKE'
+#!/bin/sh
+if [ "${FAKE_TEXT:-0}" = "1" ]; then
+  echo "Value: 4242"
+else
+  echo '{"stat":{"name":"counter","value":1234}}'
+fi
+FAKE
+chmod +x "$FAKE_XRAY"
+VT_API_PORT="62789"
+if have jq; then
+  eq "_api_stat reads the JSON output" "1234" \
+    "$(_api_stat 'user>>>main>>>traffic>>>uplink')"
+fi
+eq "_api_stat reads the text output" "4242" \
+  "$(FAKE_TEXT=1 _api_stat 'user>>>main>>>traffic>>>uplink')"
+eq "fmt_bytes on _api_stat output" "4.14 KB" "$(fmt_bytes "$(FAKE_TEXT=1 _api_stat x)")"
+
 # --- state round-trip -----------------------------------------------------
 VT_MODE="reality"; VT_PORT="54321"; VT_HOST="203.0.113.7"; VT_API_PORT="60001"
 VT_REALITY_SNI="www.microsoft.com"; VT_EMAIL="main"
@@ -269,6 +334,48 @@ if cert_issue_selfsigned "tunnel.example.com" 825 >/dev/null 2>&1; then
 else
   bad "cert_issue_selfsigned domain" "openssl failed"
 fi
+
+# --- every library must actually load -------------------------------------
+# A syntax error anywhere in a sourced file makes the shell abandon that file
+# entirely, so all of its functions stay undefined and the caller only notices
+# much later ("write_client_config: command not found"). Assert that the
+# entry points the program relies on are all defined.
+MISSING=""
+for fn in \
+  log_info log_warn die fail have require_root systemd_running sysd confirm ask \
+  ask_secret menu_pick urlencode gen_uuid rand_hex random_port port_in_use \
+  install_pkgs pkg_installed apt_update_once box pause _quiet_flag \
+  detect_public_ipv4 detect_public_ipv6 local_primary_ipv4 is_ip is_valid_ipv4 \
+  is_valid_domain resolve_a check_domain_points_here check_reality_target \
+  warn_about_cloud_firewall \
+  state_load state_save state_get is_installed users_file users_init users_count \
+  users_exists users_add users_remove users_get_uuid users_list_emails \
+  users_clients_json \
+  xray_arch xray_latest_tag xray_installed_version download_and_install_xray \
+  download_geo_assets gen_x25519 validate_json_file xray_test_config \
+  acme_bin acme_home cert_install_acme cert_issue_domain cert_issue_ip \
+  cert_issue_selfsigned cert_renew cert_summary cert_renewal_job_active \
+  build_xray_config apply_config build_client_config \
+  share_link print_qr print_users_table print_full_config write_client_config \
+  sysprep_all sysprep_dirs sysprep_swap sysprep_enable_bbr sysprep_time_sync \
+  detect_ssh_port firewall_setup firewall_open_port firewall_close_port \
+  firewall_remove_vt_rules \
+  write_xray_unit write_health_units write_cert_timer_units enable_services \
+  disable_services xray_is_active run_health_check show_service_status \
+  cmd_uninstall \
+  cmd_status cmd_view_config cmd_logs cmd_restart cmd_stop cmd_start \
+  cmd_change_port cmd_renew_cert cmd_update cmd_switch_mode cmd_rotate_keys \
+  cmd_backup cmd_restore cmd_doctor \
+  cmd_add_user cmd_remove_user cmd_list_users cmd_stats cmd_connections \
+  cmd_rotate_uuid fmt_bytes \
+  banner status_line main_menu usage cmd_self_install \
+  normalise_domain preflight wizard_ask_domain wizard_ask_mode wizard_ask_cert \
+  wizard_ask_acme_method wizard_ask_port wizard_ask_email wizard_ask_extras \
+  do_install obtain_certificate
+do
+  type -t "$fn" >/dev/null 2>&1 || MISSING+=" $fn"
+done
+eq "every library entry point is defined" "" "$MISSING"
 
 printf '\n  unit: %d passed, %d failed\n' "$PASS" "$FAIL"
 (( FAIL == 0 ))

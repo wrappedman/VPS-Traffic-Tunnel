@@ -6,10 +6,10 @@ share_link() {
   local email="${1:-${VT_EMAIL:-main}}"
   local uuid remark host port mode url_host
   uuid=$(users_get_uuid "$email")
-  [[ -n "$uuid" ]] \vert{}\vert{} { log_err "user '$email' not found."; return 1; }
-  remark=$(jq -r --arg e "$email" '.users[] \vert{} select(.email==$e) | (.remark // .email)' \
+  [[ -n "$uuid" ]] || { log_err "user '$email' not found."; return 1; }
+  remark=$(jq -r --arg e "$email" '.users[] | select(.email==$e) | (.remark // .email)' \
             "$(users_file)" 2>/dev/null)
-  [[ -n "$remark" && "$remark" != "null" ]] \vert{}\vert{} remark="$email"
+  [[ -n "$remark" && "$remark" != "null" ]] || remark="$email"
   host="${VT_HOST:?}"; port="${VT_PORT:?}"; mode="${VT_MODE:?}"
 
   if [[ "$host" == *:* && "$host" != \[*\] ]]; then
@@ -94,7 +94,7 @@ print_full_config() {
     reality)
       lines+=("security      : REALITY")
       lines+=("flow          : ${VT_FLOW:-xtls-rprx-vision}")
-      lines+=("sni / public  : ${VT_REALITY_SNI} /${VT_REALITY_PUBLIC}")
+      lines+=("sni / public  : ${VT_REALITY_SNI} / ${VT_REALITY_PUBLIC}")
       lines+=("short id      : ${VT_REALITY_SHORTID}")
       lines+=("fingerprint   : chrome")
       ;;
@@ -110,16 +110,16 @@ print_full_config() {
       fi
       ;;
   esac
-  lines+=(" ")
-  lines+=("share link:")
-  lines+=("  ${link}")
-
   box "connection config (${email})" "${lines[@]}"
+
+  # The share link is far too long for the frame, so it gets its own line
+  # where it is easy to select and copy.
+  printf '\n  %s\n  %s\n\n' "${C_BOLD}share link:${C_RESET}" "${C_GREEN}${link}${C_RESET}"
 
   local out; out=$(p "$R_ETC/config.txt")
   {
-    printf '%s\n' "${lines[@]#  }"
-    printf '\n'
+    printf '%s\n' "${lines[@]}"
+    printf '\nshare link:\n  %s\n' "$link"
   } >"$out" 2>/dev/null || true
   chmod 600 "$out" 2>/dev/null || true
 

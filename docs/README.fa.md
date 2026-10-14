@@ -181,7 +181,7 @@ sudo vt selfsigned-cert     # ساخت گواهی خودامضای جدید
 sudo vt port <n|random>     # تغییر پورت
 sudo vt switch-mode         # تغییر حالت تونل
 sudo vt backup [dir]        # پشتیبان‌گیری
-sudo vt restore <file>      # بازگردانی
+sudo vt restore <file>      # بازگردانی (‎--force بدون پرسش)
 ```
 
 ---
@@ -233,8 +233,11 @@ sudo vt restore <file>      # بازگردانی
 نصب خشک با متغیر `VT_ROOT` کار می‌کند: تمام مسیرها پیشوند می‌گیرند، بنابراین کل جریان نصب واقعاً اجرا می‌شود بدون اینکه به سیستم دست بزند.
 
 ```
-PASS: 163   FAIL: 0
+PASS: 196   FAIL: 0
 ```
+
+گزارش کامل باگ‌هایی که در بازبینی پیدا و اصلاح شدند:
+[`docs/CODE-REVIEW.md`](CODE-REVIEW.md)
 
 ---
 
