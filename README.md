@@ -251,7 +251,7 @@ The dry-run works through the `VT_ROOT` variable: every path is prefixed, so
 the real install flow executes end to end without touching the host.
 
 ```
-PASS: 163   FAIL: 0
+PASS: 167   FAIL: 0
 ```
 
 ---

@@ -19,6 +19,7 @@ _e2e_env() {
 # e2e_case <name> [vt install options...]
 e2e_case() {
   local name="$1"; shift
+  local args="$*"
   local root="$WORK/root-$name"
   mkdir -p "$root"
   # A real Ubuntu has /etc/logrotate.d; the installer only writes a rotation
@@ -73,6 +74,16 @@ e2e_case() {
   mode=$(sed -n 's/^MODE="\(.*\)"$/\1/p' "$etc/vt.env")
   port=$(sed -n 's/^PORT="\(.*\)"$/\1/p' "$etc/vt.env")
   users=$(jq '.users | length' "$etc/users.json")
+  # The host we publish must be exactly the domain the user typed.
+  if [[ "$args" == *"--domain "* ]]; then
+    local want_dom
+    want_dom=$(printf '%s' "$args" | sed -n 's/.*--domain \([^ ]*\).*/\1/p')
+    assert_eq "$name: host keeps the full domain" "$want_dom" \
+      "$(sed -n 's/^HOST="\(.*\)"$/\1/p' "$etc/vt.env")"
+    assert_contains "$name: share link uses the full domain" \
+      "$(jq -r '.outbounds[0].settings.vnext[0].address' "$root/etc/vt/client.json")" "$want_dom"
+  fi
+
   assert_eq "$name: state MODE" "$(printf '%s' "$*" | sed -n 's/.*--mode \([a-z-]*\).*/\1/p')" "$mode"
   assert_eq "$name: one user created" "1" "$users"
   if [[ "$port" =~ ^[0-9]+$ ]] && (( port >= 1 && port <= 65535 )); then

@@ -86,17 +86,17 @@ print_full_config() {
   lines+=("UUID          : $(users_get_uuid "$email")")
   case "$mode" in
     reality)
-      lines+=("Security      : REALITY")
-      lines+=("Flow          : ${VT_FLOW:-xtls-rprx-vision}")
-      lines+=("SNI / Public  : ${VT_REALITY_SNI} / ${VT_REALITY_PUBLIC}")
-      lines+=("ShortId       : ${VT_REALITY_SHORTID}")
-      lines+=("Fingerprint   : chrome")
+      lines+=("security      : REALITY")
+      lines+=("flow          : ${VT_FLOW:-xtls-rprx-vision}")
+      lines+=("sni / public  : ${VT_REALITY_SNI} / ${VT_REALITY_PUBLIC}")
+      lines+=("short id      : ${VT_REALITY_SHORTID}")
+      lines+=("fingerprint   : chrome")
       ;;
     tcp-tls|ws-tls)
-      lines+=("Security      : TLS")
-      [[ "$mode" == "ws-tls" ]] && lines+=("Network/Path  : ws ${VT_WS_PATH:-/}")
-      lines+=("Flow          : ${VT_FLOW:-—}")
-      lines+=("SNI           : ${host}")
+      lines+=("security      : TLS")
+      [[ "$mode" == "ws-tls" ]] && lines+=("network/path  : ws ${VT_WS_PATH:-/}")
+      lines+=("flow          : ${VT_FLOW:-n/a}")
+      lines+=("sni           : ${host}")
       if [[ "${VT_SELF_SIGNED:-0}" == "1" ]]; then
         lines+=("certificate   : self-signed -> allowInsecure required")
       else

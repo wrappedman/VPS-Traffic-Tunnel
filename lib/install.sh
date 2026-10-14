@@ -90,11 +90,11 @@ TXT
     if [[ -z "$domain" ]]; then
       ask domain "domain name (e.g. tunnel.example.com)" ""
     fi
-    domain="${domain,,}"; domain="${domain#*.}"; domain="${domain%.}"
+    domain=$(normalise_domain "$domain")
     while ! is_valid_domain "$domain"; do
       log_err "'$domain' is not a valid domain name."
       ask domain "domain name" ""
-      domain="${domain,,}"
+      domain=$(normalise_domain "$domain")
     done
 
     log_info "checking the DNS record for $domain ..."
@@ -113,6 +113,16 @@ TXT
   else
     WIZ_DOMAIN=""
   fi
+}
+
+# Lower-case a domain and strip a pasted scheme plus leading/trailing dots.
+# Labels are never removed: tunnel.example.com must stay tunnel.example.com.
+normalise_domain() {
+  local d="${1,,}"
+  d="${d#https://}"; d="${d#http://}"
+  d="${d%%/*}"
+  d="${d#.}"; d="${d%.}"
+  printf '%s' "$d"
 }
 
 # --------------------------------------------------------------------------

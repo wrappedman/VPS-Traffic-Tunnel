@@ -112,6 +112,17 @@ eq "ask_secret stores the value" "s3cr3t" "$SECRET"
 VT_ASSUME_YES=1
 confirm "with VT_ASSUME_YES, default n must answer no" n && bad "VT_ASSUME_YES honours default n" "yes" || ok "VT_ASSUME_YES honours default n"
 
+# --- domain normalisation -------------------------------------------------
+# Regression: the wizard used to strip the first label, turning
+# tunnel.example.com into example.com.
+. "$REPO/lib/install.sh"
+eq "normalise_domain keeps subdomains" "tunnel.example.com" "$(normalise_domain tunnel.example.com)"
+eq "normalise_domain lowercases"       "tunnel.example.com" "$(normalise_domain TUNNEL.Example.COM)"
+eq "normalise_domain strips a scheme"  "tunnel.example.com" "$(normalise_domain https://tunnel.example.com/some/path)"
+eq "normalise_domain strips http too"  "a.example.com"      "$(normalise_domain http://a.example.com)"
+eq "normalise_domain strips dots"      "example.com"        "$(normalise_domain .example.com.)"
+eq "normalise_domain keeps deep hosts" "x.y.example.co.uk"  "$(normalise_domain x.y.example.co.uk)"
+
 # --- validators -----------------------------------------------------------
 eq "is_ip v4"        yes "$(is_ip 1.2.3.4 && echo yes || echo no)"
 eq "is_ip v6"        yes "$(is_ip 2001:db8::1 && echo yes || echo no)"
