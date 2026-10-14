@@ -10,12 +10,17 @@ _e2e_env() {
   # through sudo would needlessly require sudo to be installed on a box where
   # the suite already runs as root.
   local root="$1"; shift
+  # Service calls are inert by default so a dry-run never touches the host.
+  # Set E2E_LIVE_SERVICE=1 to exercise the real start/stop path instead.
+  local skip_service=1
+  [[ -n "${E2E_LIVE_SERVICE:-}" ]] && skip_service=0
   env \
     VT_ROOT="$root" \
     VT_ASSUME_YES=1 \
     VT_SKIP_DOWNLOADS=1 \
     VT_SKIP_APT=1 \
     VT_SKIP_SYSTEMD=1 \
+    VT_SKIP_SERVICE="$skip_service" \
     VT_NO_COLOR=1 \
     PATH="$PATH" \
     "$@"
@@ -214,10 +219,14 @@ e2e_case() {
     else
       bad "$name: the archive is not corrupt" "tar tzf $bk failed"
     fi
-    if tar tzf "$bk" | grep -q '^etc/vt/'; then
+    # No pipe into `grep -q` here: grep exits on the first match, tar dies
+    # from SIGPIPE, and `set -o pipefail` would turn that into a fake failure.
+    local tl="$root/tar.list"
+    tar tzf "$bk" >"$tl" 2>/dev/null || true
+    if grep -q '^etc/vt/' "$tl"; then
       ok "$name: the archive keeps rooted member names"
     else
-      bad "$name: the archive keeps rooted member names" "$(tar tzf "$bk" | head -5)"
+      bad "$name: the archive keeps rooted member names" "$(head -5 "$tl")"
     fi
     # Wipe what the backup holds, restore, and check it all came back.
     rm -f "$conf" "$etc/vt.env"
@@ -238,6 +247,77 @@ e2e_case() {
   else
     bad "$name: vt status after install" "$(tail -n 10 "$root/install.out")"
   fi
+}
+
+# --------------------------------------------------------------------------
+# docker/entrypoint.sh — the container start command. It runs the install once
+# (or keeps an existing one) and then execs `vt run`.
+# --------------------------------------------------------------------------
+e2e_entrypoint() {
+  local root="$WORK/root-entrypoint"
+  local failroot="$WORK/root-entrypoint-fail"
+  local shim="$WORK/entrypoint-vt"
+  mkdir -p "$root/etc/logrotate.d" "$failroot" "$WORK"
+
+  # `vt` as the image has it: the real program with the container environment.
+  # (VT_SKIP_DOWNLOADS is what the whole suite sets - the offline stub takes
+  # the place of the downloaded Xray binary.)
+  cat >"$shim" <<EOF
+#!/bin/sh
+exec env VT_ROOT="$root" VT_ASSUME_YES=1 VT_SKIP_APT=1 VT_SKIP_SYSTEMD=1 \
+     VT_SKIP_DOWNLOADS=1 VT_SKIP_SERVICE=0 VT_NO_COLOR=1 PATH="$PATH" \
+     "$REPO/vt" "\$@"
+EOF
+  chmod +x "$shim"
+
+  run_entrypoint() { # run_entrypoint [args...]
+    VT_ROOT="$root" VT_BIN="$shim" timeout 25 "$REPO/docker/entrypoint.sh" "$@" 2>&1
+  }
+
+  local out
+  # 1. nothing installed yet: the default install runs, then the supervisor.
+  out=$(run_entrypoint)
+  assert_contains "entrypoint: installs on first start" "$out" "installing: --mode reality"
+  assert_contains "entrypoint: starts the supervisor" "$out" "starting the supervisor"
+  assert_contains "entrypoint: adds --yes/--firewall once" "$out" "--yes --firewall no"
+  assert_file "entrypoint: state after the first start" "$root/etc/vt/vt.env"
+  assert_file "entrypoint: config after the first start" "$root/usr/local/etc/xray/config.json"
+
+  # 2. installed already: no reinstall, the keys must survive a restart.
+  local before; before=$(cat "$root/etc/vt/vt.env")
+  out=$(run_entrypoint)
+  assert_contains "entrypoint: keeps an existing install" "$out" "an existing installation was found"
+  assert_eq "entrypoint: the keys survived the start" "$before" "$(cat "$root/etc/vt/vt.env")"
+
+  # 3. VT_FORCE_INSTALL rebuilds with the options given on the command line,
+  #    and anything after `--` is handed to `vt run`.
+  # `export` in the subshell: a plain VAR=func puts the value in the function's
+  # own scope, from where the entrypoint does not see it.
+  out=$(export VT_FORCE_INSTALL=1
+        run_entrypoint --mode reality --port 24555 \
+          --sni www.microsoft.com -- container-test-token)
+  assert_contains "entrypoint: rebuilds when asked" "$out" "rebuilding the installation"
+  assert_contains "entrypoint: the install options are used" \
+    "$(cat "$root/etc/vt/vt.env")" 'PORT="24555"'
+  assert_contains "entrypoint: run options are passed through" \
+    "$out" "starting the supervisor: vt run container-test-token"
+
+  # 4. a half-written install (state without config) is repaired, not skipped.
+  rm -f "$root/usr/local/etc/xray/config.json"
+  out=$(run_entrypoint --mode reality --port 24555 --sni www.microsoft.com)
+  assert_contains "entrypoint: repairs a half-written install" "$out" "installing:"
+  assert_file "entrypoint: config back after the repair" "$root/usr/local/etc/xray/config.json"
+
+  # 5. a failing install must not start a tunnel that cannot work.
+  out=$(VT_ROOT="$failroot" VT_BIN=/bin/false timeout 25 "$REPO/docker/entrypoint.sh" 2>&1)
+  assert_contains "entrypoint: a failed install is reported" "$out" "not starting the tunnel"
+  if [[ "$out" == *"starting the supervisor"* ]]; then
+    bad "entrypoint: no supervisor after a failed install" "it started anyway"
+  else
+    ok "entrypoint: no supervisor after a failed install"
+  fi
+
+  e2e_uninstall "entrypoint"
 }
 
 e2e_uninstall() {
@@ -278,4 +358,170 @@ e2e_uninstall() {
   else
     bad "uninstall --purge" "$(tail -n 15 "$root/uninstall2.out")"
   fi
+}
+
+# --------------------------------------------------------------------------
+# Container install: no systemd at all (Railway, Docker, Fly.io, LXC, WSL).
+# `systemctl` does not exist there, so before this was handled every service
+# call became a silent no-op and the tunnel never started.
+# --------------------------------------------------------------------------
+e2e_container_services() {
+  local name="container-no-systemd"
+  local root="$WORK/root-$name"
+  local bin="$root/usr/local/bin/xray"
+  mkdir -p "$root/etc/logrotate.d"
+
+  # Opt this one case into the real service layer.
+  E2E_LIVE_SERVICE=1
+
+  if _e2e_env "$root" "$REPO/vt" install --mode reality --port 24444 --email main \
+       --sni www.microsoft.com >"$root/install.out" 2>&1; then
+    ok "container: install on a machine without systemd"
+  else
+    bad "container: install on a machine without systemd" "$(tail -n 20 "$root/install.out")"
+    E2E_LIVE_SERVICE=0
+    return 1
+  fi
+  assert_contains "container: install explains there is no systemd" \
+    "$(cat "$root/install.out")" "no systemd on this machine"
+  assert_file "container: config still written" "$root/usr/local/etc/xray/config.json"
+  assert_contains "container: the generated config is valid" \
+    "$(python3 "$HERE/validate_config.py" "$root/usr/local/etc/xray/config.json" 2>&1 && echo ok)" "ok"
+
+    # The image's start command is docker/entrypoint.sh - drive it too.
+  e2e_entrypoint
+
+  # A container start command may be `vt install ... --yes && vt run` and it
+  # runs again on every redeploy: the second install must be a harmless no-op
+  # instead of rotating the keys and breaking every configured client.
+  local state_before
+  state_before=$(cat "$root/etc/vt/vt.env")
+  _e2e_env "$root" "$REPO/vt" install --mode reality --port 24444 --email main \
+       --sni www.microsoft.com >"$root/install2.out" 2>&1 || true
+  assert_contains "container: a repeated unattended install is a no-op" \
+    "$(cat "$root/install2.out")" "already installed"
+  assert_eq "container: the repeated install keeps the keys" \
+    "$state_before" "$(cat "$root/etc/vt/vt.env")"
+
+  # The offline stub exits straight away on `run`; swap in something that
+  # stays up (and exits on SIGTERM, like the real binary) so the supervisor
+  # has a child to keep alive.
+  cat >"$bin" <<'FAKE'
+#!/bin/sh
+case "$1" in
+  version) echo "Xray 0.0.0 (container stub)"; exit 0 ;;
+  -test)   exit 0 ;;
+  run)     echo "stub-xray-started"; trap 'exit 0' TERM INT
+           while :; do sleep 1; done ;;
+esac
+exit 1
+FAKE
+  chmod +x "$bin"
+
+  _e2e_env "$root" "$REPO/vt" start >"$root/svc.out" 2>&1 || true
+  assert_contains "container: vt start launches the tunnel" \
+    "$(cat "$root/svc.out")" "started in the background"
+  assert_file "container: a pid file is written" "$root/var/lib/vt/xray.pid"
+  assert_contains "container: vt status reports it as active" \
+    "$(_e2e_env "$root" "$REPO/vt" status 2>&1)" "Service:               active"
+  assert_contains "container: vt logs reads the captured log" \
+    "$(_e2e_env "$root" "$REPO/vt" logs 2>&1)" "stub-xray-started"
+  assert_contains "container: vt logs follow says journald is missing" \
+    "$(_e2e_env "$root" "$REPO/vt" logs follow 2>&1)" "journalctl only works under systemd"
+
+  _e2e_env "$root" "$REPO/vt" stop >"$root/svc.out" 2>&1 || true
+  assert_contains "container: vt stop kills it" "$(cat "$root/svc.out")" "stopped"
+  assert_contains "container: vt status reports it as inactive" \
+    "$(_e2e_env "$root" "$REPO/vt" status 2>&1)" "Service:               inactive"
+
+  _e2e_env "$root" "$REPO/vt" restart >"$root/svc.out" 2>&1 || true
+  assert_contains "container: vt restart brings it back" \
+    "$(_e2e_env "$root" "$REPO/vt" status 2>&1)" "Service:               active"
+
+  # What vt-health.timer does on a VPS has to work without systemd too:
+  # notice that the tunnel is down, then start it again.
+  _e2e_env "$root" "$REPO/vt" stop >"$root/svc.out" 2>&1 || true
+  assert_contains "container: vt health restarts a dead tunnel" \
+    "$(_e2e_env "$root" "$REPO/vt" health 2>&1 || true)" "xray service is not active"
+  assert_contains "container: the tunnel is up again after vt health" \
+    "$(_e2e_env "$root" "$REPO/vt" status 2>&1)" "Service:               active"
+
+  # `vt run` is the container start command: it supervises the child in the
+  # foreground and must stop it on SIGTERM (docker stop / platform redeploy).
+  _e2e_env "$root" timeout 8 "$REPO/vt" run >"$root/run.out" 2>&1 || true
+  assert_contains "container: vt run starts xray in the foreground" \
+    "$(cat "$root/run.out")" "xray started (pid"
+  sleep 1
+  if pgrep -f "$bin run" >/dev/null 2>&1; then
+    bad "container: vt run stops its child on SIGTERM" "the child is still running"
+    pkill -f "$bin run" >/dev/null 2>&1 || true
+  else
+    ok "container: vt run stops its child on SIGTERM"
+  fi
+
+  # The same supervisor, started in the background (what a container start
+  # command does) must be reachable from another shell: `vt stop` has to shut
+  # the supervisor itself down, otherwise it would just start a new child.
+  _e2e_env "$root" "$REPO/vt" run >"$root/run2.out" 2>&1 &
+  local supjob=$!
+  local i
+  for i in $(seq 1 20); do
+    [[ -s "$root/var/lib/vt/vt-run.pid" ]] && break
+    sleep 1
+  done
+  assert_contains "container: vt status names the vt run supervisor" \
+    "$(_e2e_env "$root" "$REPO/vt" status 2>&1)" "vt run supervisor"
+  _e2e_env "$root" "$REPO/vt" run >"$root/run3.out" 2>&1 || true
+  assert_contains "container: a second vt run refuses to start" \
+    "$(cat "$root/run3.out")" "already supervising the tunnel"
+
+  # Changing the configuration while the supervisor runs must not start a
+  # second Xray: the supervisor replaces its own child (and keeps the port).
+  local child_before child_after=""
+  child_before=$(pgrep -f "$bin run" | head -n1 || true)
+  assert_contains "container: a config change defers to the supervisor" \
+    "$(_e2e_env "$root" "$REPO/vt" add-user bob 2>&1)" "will be restarted by the vt run supervisor"
+  for i in $(seq 1 10); do
+    child_after=$(pgrep -f "$bin run" | head -n1 || true)
+    [[ -n "$child_after" && "$child_after" != "$child_before" ]] && break
+    sleep 1
+  done
+  if [[ -n "$child_after" && "$child_after" != "$child_before" ]]; then
+    ok "container: the supervisor replaced the child after the edit"
+  else
+    bad "container: the supervisor replaced the child after the edit" \
+      "pid was ${child_before:-none}, now ${child_after:-none}"
+  fi
+
+  _e2e_env "$root" "$REPO/vt" stop >"$root/svc.out" 2>&1 || true
+  wait "$supjob" 2>/dev/null || true
+  if pgrep -f "$bin run" >/dev/null 2>&1; then
+    bad "container: vt stop shuts the vt run supervisor down" "xray is still running"
+    pkill -f "$bin run" >/dev/null 2>&1 || true
+  else
+    ok "container: vt stop shuts the vt run supervisor down"
+  fi
+
+  # A process called xray that is not *this* root's binary has to be left
+  # alone: running the suite on a machine that serves its own tunnel must
+  # never kill that tunnel. (The old code used `pkill -x xray`.)
+  local foreign="$WORK/foreign/usr/local/bin/xray"
+  mkdir -p "$(dirname "$foreign")"
+  sed 's/stub-xray-started/stub-foreign/' "$bin" >"$foreign"
+  chmod +x "$foreign"
+  "$foreign" run >/dev/null 2>&1 &
+  local foreignpid=$!
+  sleep 1
+  _e2e_env "$root" "$REPO/vt" stop >/dev/null 2>&1 || true
+  _e2e_env "$root" "$REPO/vt" health >/dev/null 2>&1 || true
+  if kill -0 "$foreignpid" 2>/dev/null; then
+    ok "container: another root's xray process is left alone"
+  else
+    bad "container: another root's xray process is left alone" "it was killed"
+  fi
+  kill "$foreignpid" 2>/dev/null || true
+  pkill -f "$foreign" >/dev/null 2>&1 || true
+
+  e2e_uninstall "$name"
+  E2E_LIVE_SERVICE=0
 }

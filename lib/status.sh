@@ -35,6 +35,9 @@ cmd_logs() {
     xray|service)
       if systemd_running; then
         journalctl -u xray.service -n "${VT_LOG_LINES:-100}" --no-pager
+      elif [[ -f "$(p "$R_XRAY_LOG")" ]]; then
+        # No journald (container): vt-captured stdout of the supervised process.
+        tail -n "${VT_LOG_LINES:-100}" "$(p "$R_XRAY_LOG")"
       elif [[ -f "$(p "$R_LOG")/xray-error.log" ]]; then
         tail -n "${VT_LOG_LINES:-100}" "$(p "$R_LOG")/xray-error.log"
       else
@@ -68,14 +71,14 @@ cmd_logs() {
 }
 
 cmd_restart() {
-  sysd restart xray.service || die "restart failed."
+  service_xray restart || die "restart failed."
   sleep 1
   if xray_is_active; then log_ok "service restarted."; else log_err "the service did not come up."; fi
 }
 
-cmd_stop()   { sysd stop xray.service;    log_ok "service stopped."; }
+cmd_stop()   { service_xray stop; log_ok "service stopped."; }
 cmd_start()  {
-  sysd start xray.service
+  service_xray start
   sleep 1
   if xray_is_active; then log_ok "service started."; else log_err "the service did not come up."; fi
 }
@@ -131,7 +134,7 @@ cmd_update() {
   VT_XRAY_VERSION="$new"
   state_save
   if xray_test_config "$(p "$R_XRAY_CONF")"; then
-    sysd restart xray.service || true
+    service_xray restart || true
     log_ok "updated: ${old} -> ${new}"
   else
     log_err "the config is not compatible with the new version; the service was not restarted."
@@ -263,6 +266,15 @@ cmd_doctor() {
     log_err "config.json not found."; issues=$((issues + 1))
   fi
 
+  if systemd_running; then
+    log_info "service manager: systemd (xray.service)"
+  elif is_installed; then
+    log_info "service manager: none (no systemd - process mode)"
+    log_note "the tunnel only lives as long as its process; on a container"
+    log_note "platform use 'vt run' as the start command so it is restarted"
+    log_note "with the container and the certificate keeps being renewed."
+  fi
+
   if xray_is_active; then log_ok "the xray service is active."
   else log_err "the xray service is not active."; issues=$((issues + 1)); fi
 
@@ -290,8 +302,8 @@ cmd_doctor() {
     log_ok "system clock: $(date -u '+%Y-%m-%d %H:%M UTC')"
   fi
 
-  local ccur; ccur=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo '?')
-  log_info "congestion control: $ccur"
+  local ccur; ccur=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || true)
+  log_info "congestion control: ${ccur:-unavailable (no /proc/sys in this container?)}"
 
   if have ufw && ufw status 2>/dev/null | grep -qi '^Status: active'; then
     log_info "firewall is active:"

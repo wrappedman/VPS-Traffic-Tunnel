@@ -33,6 +33,10 @@ R_XRAY_BIN="/usr/local/bin/xray"
 R_XRAY_ASSETS="/usr/local/share/xray"
 R_XRAY_CONF_DIR="/usr/local/etc/xray"
 R_XRAY_CONF="$R_XRAY_CONF_DIR/config.json"
+# Used when there is no systemd to supervise the tunnel (containers).
+R_XRAY_PID="$R_LIB/xray.pid"
+R_RUN_PID="$R_LIB/vt-run.pid"
+R_XRAY_LOG="$R_LOG/xray.log"
 R_XRAY_SERVICE="/etc/systemd/system/xray.service"
 R_VT_HEALTH_SERVICE="/etc/systemd/system/vt-health.service"
 R_VT_HEALTH_TIMER="/etc/systemd/system/vt-health.timer"
@@ -52,6 +56,7 @@ VT_ASSUME_YES="${VT_ASSUME_YES:-0}"     # never prompt, take the default
 VT_SKIP_DOWNLOADS="${VT_SKIP_DOWNLOADS:-0}"  # do not fetch anything from the net
 VT_SKIP_APT="${VT_SKIP_APT:-0}"         # do not call apt-get
 VT_SKIP_SYSTEMD="${VT_SKIP_SYSTEMD:-0}" # do not talk to systemd
+VT_SKIP_SERVICE="${VT_SKIP_SERVICE:-0}" # never start/stop the tunnel (tests)
 VT_FORCE="${VT_FORCE:-0}"               # ignore "already installed" guard
 VT_NO_COLOR="${VT_NO_COLOR:-0}"
 

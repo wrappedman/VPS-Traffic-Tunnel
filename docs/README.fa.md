@@ -53,6 +53,88 @@ sudo vt
 
 ---
 
+## کانتینر بدون systemd (Railway، Docker، Fly.io، LXC، WSL)
+
+داخل کانتینر systemd وجود ندارد، پس چیزی نیست که سرویس را به آن بسپاریم. نصب‌کننده
+این را تشخیص می‌دهد، اعلام می‌کند و خودش تونل را زنده نگه می‌دارد؛ به‌جای اینکه مثل
+قبل بی‌صدا هیچ کاری نکند:
+
+```
+[!] no systemd on this machine (container) - running the tunnel as a
+    plain background process instead of a service.
+```
+
+* `vt start` / `vt stop` / `vt restart` مستقیم پروسه‌ی Xray را بالا و پایین می‌کنند
+  (pid در `/var/lib/vt/xray.pid`، خروجی در `/var/log/vt/xray.log`).
+  در `vt status` مقدار `Managed by: background process` دیده می‌شود.
+* `vt logs` به‌جای `journalctl` همان فایل لاگ را می‌خواند.
+* `vt health` و تمدید گواهی مثل VPS کار می‌کنند، پس بقیه‌ی دستورات هم بی‌تغییر می‌مانند.
+
+اما یک پروسه‌ی پس‌زمینه **بعد از هر ری‌دیپلوی از بین می‌رود**: پلتفرم کانتینر را دور
+می‌ریزد و یک کانتینر تازه می‌سازد. به پلتفرم یک دستور شروع بدهید که در پیش‌زمینه
+بماند، یعنی `vt run`:
+
+```bash
+vt run      # نگهبان (supervisor): Xray را در پیش‌زمینه زنده نگه می‌دارد
+```
+
+`vt run` تونل را اجرا می‌کند، اگر کرش کرد ۳ ثانیه بعد دوباره بالا می‌آورد و هر
+`VT_SUPERVISE_INTERVAL` ثانیه (پیش‌فرض ۱۸۰۰) در صورت نیاز گواهی را تمدید و یک خط
+`alive:` ثبت می‌کند. با `SIGTERM`/`SIGINT` (همان سیگنالی که پلتفرم هنگام توقف
+کانتینر می‌فرستد) فرزندش را تمیز خاموش می‌کند.
+
+### Railway
+
+۱. مخزن را در Railway اجرا کنید (کانتینر با کاربر root اجرا می‌شود که این نصب‌کننده
+   به آن نیاز دارد).
+۲. **Settings → Deploy → Custom Start Command:** مقدار `vt run`
+۳. یک‌بار نصب کنید؛ یا از **Railway shell** دستور `vt install --yes` را بزنید، یا
+   همان دستور دلخواه را در Start Command بگذارید:
+   `vt install --mode reality --port random --email main --sni www.microsoft.com --yes && vt run`
+   (اگر نصب قبلاً انجام شده باشد، `vt install --yes` دست به کانفیگ موجود نمی‌زند و
+   بلافاصله با موفقیت خارج می‌شود؛ پس این خط در هر ری‌دیپلوی بی‌خطر است.) اگر همین
+   مخزن را در Railway deploy کنید، لازم نیست Start Command بدهید: entrypoint
+   (`docker/entrypoint.sh`) همین کار را خودش انجام می‌دهد.
+۴. اگر ولوم پایدار وصل نکنید، `/etc/vt` با هر ری‌دیپلوی از نو ساخته می‌شود؛ با خط
+   دستور بالا تونل خودکار نصب می‌شود اما **UUID کاربران و کلیدها عوض می‌شوند**.
+   برای حفظ آن‌ها یک Volume روی `/etc/vt` وصل کنید.
+۵. برای دسترسی از بیرون، پروکسی HTTP ریلیوی فقط HTTP را می‌فهمد؛ پس یک
+   **TCP Proxy** بسازید (سرویس → *Networking* / *Public Networking*) و پورت مقصدش
+   را برابر پورت تونل بگذارید. متغیر `$PORT` که Railway ست می‌کند به‌عنوان پورت
+   پیشنهادی تونل در نظر گرفته می‌شود، پس معمولاً همین‌طوری جور در می‌آید
+   (`vt port <n>` بعداً پورت را عوض می‌کند).
+
+### Docker (ایمیج آماده)
+
+مخزن خودش `docker/Dockerfile` و `docker/entrypoint.sh` را دارد، پس چیزی برای
+نوشتن لازم نیست:
+
+```bash
+docker build -f docker/Dockerfile -t vt-tunnel .
+docker run -d --name vt --restart unless-stopped -p 24443:24443 \
+  -v vt-etc:/etc/vt vt-tunnel \
+  --mode reality --port 24443 --sni www.microsoft.com
+```
+
+entrypoint در اولین اجرا نصب را انجام می‌دهد (خودش `--yes --firewall no` را اضافه
+می‌کند)، در اجراهای بعدی نصب موجود را دست‌نخورده نگه می‌دارد — یعنی کلید REALITY و
+UUID کاربران بعد از ری‌استارت باقی می‌مانند — و در پایان `vt run` را اجرا می‌کند.
+آرگومان‌های قبل از `--` به `vt install` و بعد از آن به `vt run` می‌روند:
+
+```bash
+docker run ... vt-tunnel --mode reality --port 24443 -- ...   # بعد از -- برای vt run
+```
+
+متغیرهای مفید: `VT_INSTALL_ARGS` و `VT_RUN_ARGS` برای مقدارهای پیش‌فرض و
+`VT_FORCE_INSTALL=1` برای ساخت مجدد (کلیدها عوض می‌شوند و همه‌ی کلاینت‌ها باید
+به‌روز شوند).
+
+ترکیب `--restart unless-stopped` و `vt run` در پیش‌زمینه، همان «همیشه روشن» بودن
+`xray.service` در VPS را می‌دهد. یک Volume روی `/etc/vt` وصل کنید (مثل دستور بالا)
+وگرنه با هر کانتینر تازه، کلیدها از نو ساخته می‌شوند.
+
+---
+
 ## سه حالت تونل
 
 ### ۱) REALITY — پیشنهاد ما
@@ -157,6 +239,11 @@ sudo vt install --mode ws-tls --domain tunnel.example.com \
 
 گزینه‌ها: `--mode --domain --cert --acme --webroot --dns-plugin --dns-env --dns-token --sni --port --email --email-acme --firewall --adblock --no-torrent --force --yes`
 
+`--yes` هرگز روی نصب موجود بازنویسی نمی‌کند: پیام `already installed` را چاپ
+می‌کند و با کد ۰ خارج می‌شود، پس خطی مثل `vt install ... --yes && vt run` در هر
+ری‌دیپلوی بی‌خطر است. برای ساخت مجدد `--force` بدهید (کلید REALITY و UUID‌ها عوض
+می‌شوند و باید همه‌یکلاینت‌ها را به‌روز کنید).
+
 ### مدیریت کاربران
 ```bash
 sudo vt add-user [name]     # کاربر جدید + لینک اشتراک + QR
@@ -172,6 +259,7 @@ sudo vt rotate-keys         # چرخش کلیدهای REALITY (کل کانفیگ
 ```bash
 sudo vt status
 sudo vt restart | stop | start
+sudo vt run                 # نگهبان پیش‌زمینه (دستور شروع کانتینر)
 sudo vt logs [xray|error|health|cert|install|follow]
 sudo vt doctor              # عیب‌یابی خودکار
 sudo vt health              # همان کاری که تایمر سلامت انجام می‌دهد
@@ -201,6 +289,9 @@ sudo vt restore <file>      # بازگردانی (‎--force بدون پرسش)
 /usr/local/bin/xray                  باینری Xray
 /usr/local/share/xray/               geoip.dat / geosite.dat (اختیاری)
 /var/log/vt/                         لاگ نصب، سلامت، گواهی، خطاهای Xray
+/var/log/vt/xray.log                 خروجی پروسه‌ی تونل در کانتینر (بدون systemd)
+/var/lib/vt/xray.pid                 pid همان پروسه
+/var/lib/vt/vt-run.pid               pid نگهبان `vt run`
 
 /etc/systemd/system/xray.service
 /etc/systemd/system/vt-health.{service,timer}
@@ -228,12 +319,16 @@ sudo vt restore <file>      # بازگردانی (‎--force بدون پرسش)
 ./tests/run_tests.sh
 ```
 
-شش مرحله: بررسی نحو، ShellCheck، تست واحد توابع، **نصب کامل خشک (dry-run) برای هر چهار ترکیب حالت/گواهی** داخل یک ریشه‌ی موقت، اعتبارسنجی ساختار کانفیگ Xray، و تست حذف.
+هفت مرحله: بررسی نحو، نگهبان باقی‌مانده‌ی escape‌های LaTeX، ShellCheck، تست واحد توابع،
+**نصب کامل خشک (dry-run) برای هر چهار ترکیب حالت/گواهی** داخل یک ریشه‌ی موقت،
+اعتبارسنجی ساختار کانفیگ Xray، یک **اجرای کامل کانتینری بدون systemd**
+(نصب → start/stop/restart → `vt run` → `vt stop` → `docker/entrypoint.sh` → حذف)
+و تست حذف.
 
 نصب خشک با متغیر `VT_ROOT` کار می‌کند: تمام مسیرها پیشوند می‌گیرند، بنابراین کل جریان نصب واقعاً اجرا می‌شود بدون اینکه به سیستم دست بزند.
 
 ```
-PASS: 196   FAIL: 0
+PASS: 252   FAIL: 0
 ```
 
 گزارش کامل باگ‌هایی که در بازبینی پیدا و اصلاح شدند:
@@ -249,6 +344,8 @@ PASS: 196   FAIL: 0
 | پورت باز است ولی اتصال برقرار نمی‌شود | در حالت REALITY، سایت استتار (`--sni`) را عوض کنید |
 | `certificate has expired` | `sudo vt renew-cert` و سپس `sudo vt logs cert` |
 | سرویس بالا نمی‌آید | `sudo vt logs error` |
+| کانتینر: بعد از هر ری‌دیپلوی چیزی گوش نمی‌دهد | به‌عنوان Start Command از `vt run` استفاده کنید؛ `vt start` تنها با کانتینر از بین می‌رود |
+| کانتینر: `vt status` می‌گوید inactive | `sudo vt start` و بعد `sudo vt logs` (در کانتینر journald وجود ندارد) |
 | سرعت کم است | `sysctl net.ipv4.tcp_congestion_control` باید `bbr` باشد |
 
 جزئیات بیشتر: [`docs/TROUBLESHOOTING.md`](TROUBLESHOOTING.md)

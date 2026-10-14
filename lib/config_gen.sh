@@ -274,7 +274,7 @@ apply_config() {
   if [[ -n "${VT_EMAIL:-}" ]] && users_exists "${VT_EMAIL}"; then
     write_client_config "$VT_EMAIL" "$(p "$R_ETC")/client.json" >/dev/null 2>&1 || true
   fi
-  sysd restart xray.service || log_warn "failed to restart the xray service."
+  service_xray restart || log_warn "failed to restart the xray service."
   return 0
 }
 

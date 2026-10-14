@@ -186,6 +186,7 @@ ${C_BOLD}install options (for a fully unattended install):${C_RESET}
   --adblock <yes|no>
   --no-torrent <yes|no>
   --yes                      never prompt, use the defaults
+  --force                    reinstall/overwrite even if already installed
 
 ${C_BOLD}management:${C_RESET}
   add-user [name]            rm-user [name]        users
@@ -195,6 +196,7 @@ ${C_BOLD}management:${C_RESET}
 
 ${C_BOLD}service:${C_RESET}
   status                     restart | stop | start
+  run                        keep the tunnel in the foreground (containers)
   logs [xray|error|health|cert|install|follow]
   doctor                     health [--quiet]
   backup [dir]               restore <file> [--force]
@@ -206,6 +208,7 @@ ${C_BOLD}environment variables:${C_RESET}
   VT_SKIP_APT=1              never call apt-get
   VT_SKIP_SYSTEMD=1          never call systemctl
   VT_ROOT=/path              operate on an alternate root (used by the tests)
+  VT_SUPERVISE_INTERVAL=1800 seconds between certificate checks in 'vt run'
 
 USAGE
 }

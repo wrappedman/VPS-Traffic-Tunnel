@@ -152,7 +152,39 @@ sudo vt install
 
 ---
 
-## 8. Files that are useful in a bug report
+## 8. Containers without systemd (Railway, Docker, Fly.io, WSL)
+
+`systemctl` does not exist inside these, so the tunnel is supervised by `vt`
+itself instead of by a service:
+
+```bash
+sudo vt status                  # Managed by: vt run supervisor (pid N, no systemd)
+sudo vt start                   # start it now
+sudo vt logs                    # reads /var/log/vt/xray.log, not journalctl
+sudo vt logs follow             # says that journald is missing
+```
+
+* **Nothing listens after a redeploy** - a background process dies with the
+  container. Make `vt run` the start command (Railway: *Settings -> Deploy ->
+  Custom Start Command*), or `... && vt run` after an install.
+* **`vt run` exits immediately** - check that the binary and the config exist
+  (`vt doctor`); the supervisor prints the child's exit status and points at
+  the log.
+* **`vt install --yes` prints "already installed"** - that is deliberate: an
+  unattended install must not rotate the keys of a working tunnel. Add
+  `--force` if you really want to rebuild it.
+* **Every redeploy has a new UUID** - `/etc/vt` is not on a persistent volume,
+  so attach a volume there (see the container section in the README).
+* **`Auto renewal: none`** - without systemd only `vt run` renews the
+  certificate; start it and the row changes to `vt run supervisor`.
+* **The image does not start on Railway** - `docker/entrypoint.sh` prints why:
+  either the install failed (`vt install ...` by hand inside a shell shows the
+  detail) or the container has no `/etc/vt` volume, in which case the keys are
+  regenerated on every redeploy.
+
+---
+
+## 9. Files that are useful in a bug report
 
 ```bash
 sudo vt doctor

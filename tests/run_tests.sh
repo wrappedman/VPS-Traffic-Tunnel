@@ -53,10 +53,10 @@ assert_json() { if jq -e "$2" "$3" >/dev/null 2>&1; then ok "$1"; else bad "$1" 
 export REPO WORK
 
 # --------------------------------------------------------------------------
-sect "1/6 syntax"
+sect "1/7 syntax"
 # --------------------------------------------------------------------------
 SYNTAX_BAD=0
-for f in "$REPO/vt" "$REPO"/lib/*.sh "$REPO"/tests/*.sh; do
+for f in "$REPO/vt" "$REPO/bootstrap.sh" "$REPO"/lib/*.sh "$REPO"/tests/*.sh "$REPO"/docker/*.sh; do
   if ! bash -n "$f" 2>"$WORK/syn.err"; then
     SYNTAX_BAD=$((SYNTAX_BAD + 1))
     bad "bash -n $(basename "$f")" "$(cat "$WORK/syn.err")"
@@ -72,7 +72,7 @@ done
 # The backslash is written as the character class [\\] so this check never
 # matches its own pattern.
 LATEX_HITS=$(grep -rnE '[\\](vert|%s|%Y|[_&{}])' \
-  "$REPO/vt" "$REPO"/lib/*.sh "$REPO"/tests/*.sh 2>/dev/null || true)
+  "$REPO/vt" "$REPO"/lib/*.sh "$REPO"/tests/*.sh "$REPO"/docker/*.sh 2>/dev/null || true)
 if [[ -z "$LATEX_HITS" ]]; then
   ok "no LaTeX-style escaping in the sources"
 else
@@ -80,14 +80,14 @@ else
 fi
 
 # --------------------------------------------------------------------------
-sect "2/6 shellcheck"
+sect "2/7 shellcheck"
 # --------------------------------------------------------------------------
 SHELLCHECK_BIN=""
 for c in shellcheck "$HOME/bin/shellcheck"; do
   command -v "$c" >/dev/null 2>&1 && { SHELLCHECK_BIN=$(command -v "$c"); break; }
 done
 if [[ -n "$SHELLCHECK_BIN" ]]; then
-  if (cd "$REPO" && "$SHELLCHECK_BIN" -x -s bash vt lib/*.sh tests/*.sh) >"$WORK/sc.out" 2>&1; then
+  if (cd "$REPO" && "$SHELLCHECK_BIN" -x -s bash vt bootstrap.sh lib/*.sh tests/*.sh docker/*.sh) >"$WORK/sc.out" 2>&1; then
     ok "shellcheck clean"
   else
     bad "shellcheck" "$(head -n 40 "$WORK/sc.out")"
@@ -97,7 +97,7 @@ else
 fi
 
 # --------------------------------------------------------------------------
-sect "3/6 unit tests"
+sect "3/7 unit tests"
 # --------------------------------------------------------------------------
 bash "$HERE/unit_test.sh"
 UNIT_RC=$?
@@ -108,7 +108,7 @@ else
 fi
 
 # --------------------------------------------------------------------------
-sect "4/6 install dry-runs"
+sect "4/7 install dry-runs"
 # --------------------------------------------------------------------------
 # shellcheck source=tests/e2e_lib.sh
 . "$HERE/e2e_lib.sh"
@@ -123,7 +123,7 @@ e2e_case "ws-tls-domain-letsencrypt" \
   --mode ws-tls --domain proxy.example.org --cert letsencrypt-domain --acme standalone --port 443
 
 # --------------------------------------------------------------------------
-sect "5/6 xray config schema"
+sect "5/7 xray config schema"
 # --------------------------------------------------------------------------
 for d in "$WORK"/root-*; do
   conf="$d/usr/local/etc/xray/config.json"
@@ -136,7 +136,14 @@ for d in "$WORK"/root-*; do
 done
 
 # --------------------------------------------------------------------------
-sect "6/6 uninstall"
+sect "6/7 container services (no systemd)"
+# --------------------------------------------------------------------------
+# Railway/Docker/Fly containers have no systemd: `systemctl` never exists
+# there, so the tunnel has to be supervised as a plain process.
+e2e_container_services
+
+# --------------------------------------------------------------------------
+sect "7/7 uninstall"
 # --------------------------------------------------------------------------
 e2e_uninstall "reality-random-port"
 
