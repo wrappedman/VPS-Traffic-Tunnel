@@ -39,6 +39,14 @@ share_link() {
       q+=("alpn=http%2F1.1" "fp=chrome" "encryption=none")
       if [[ "${VT_SELF_SIGNED:-0}" == "1" ]]; then q+=("allowInsecure=1"); fi
       ;;
+    ws-edge)
+      # The client talks to the TLS edge, the container only sees WebSocket.
+      q+=("type=ws" "security=tls")
+      q+=("sni=$(urlencode "$host")" "host=$(urlencode "$host")")
+      q+=("path=$(urlencode "${VT_WS_PATH:-/}")")
+      q+=("alpn=http%2F1.1" "fp=chrome" "encryption=none")
+      port="${VT_EDGE_PORT:-443}"
+      ;;
     *) log_err "unknown mode: $mode"; return 1 ;;
   esac
 
@@ -97,6 +105,13 @@ print_full_config() {
       lines+=("sni / public  : ${VT_REALITY_SNI} / ${VT_REALITY_PUBLIC}")
       lines+=("short id      : ${VT_REALITY_SHORTID}")
       lines+=("fingerprint   : chrome")
+      ;;
+    ws-edge)
+      lines+=("security      : TLS, terminated by the platform edge")
+      lines+=("network/path  : ws ${VT_WS_PATH:-/}")
+      lines+=("connect to    : ${host}:${VT_EDGE_PORT:-443} (the edge)")
+      lines+=("listening on  : port ${VT_PORT}")
+      lines+=("certificate   : provided by the edge")
       ;;
     tcp-tls|ws-tls)
       lines+=("security      : TLS")

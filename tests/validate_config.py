@@ -104,6 +104,19 @@ def main(path: str) -> int:
             ws = stream.get("wsSettings", {})
             need(ws.get("path", "").startswith("/"), f"wsSettings.path must start with /: {ws.get('path')!r}")
             need(len(ws.get("path", "")) >= 8, "wsSettings.path should be long enough to be unguessable")
+    elif security in (None, "none"):
+        # Plain WebSocket: the TLS is terminated in front of the container
+        # (Railway's *.up.railway.app edge, Cloudflare, nginx). The client
+        # still connects over wss:// to the edge on port 443.
+        need(network == "ws", "a security-less inbound must be the ws network")
+        need("tlsSettings" not in stream, "a plain ws inbound must not carry tlsSettings")
+        ws = stream.get("wsSettings", {})
+        need(ws.get("path", "").startswith("/"),
+             f"wsSettings.path must start with /: {ws.get('path')!r}")
+        need(len(ws.get("path", "")) >= 8,
+             "wsSettings.path should be long enough to be unguessable")
+        for client in clients:
+            need("flow" not in client, "WebSocket clients must not set a flow")
     else:
         problems.append(f"unknown streamSettings.security: {security!r}")
 

@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-14
 **Scope:** every file under `lib/`, the `vt` entry point and the test suite.
-**Verified with:** `./tests/run_tests.sh` -> `PASS: 252   FAIL: 0`, ShellCheck clean.
+**Verified with:** `./tests/run_tests.sh` -> `PASS: 303   FAIL: 0`, ShellCheck clean.
 
 ---
 
@@ -150,7 +150,7 @@ same silent path (and it only asserted that the install finished).
 | `xray_start_process` | On failure it now reports the child's real exit status, and says so when the log is empty (instead of an empty "the last lines of the log say why:"). |
 | `docker/Dockerfile`, `docker/entrypoint.sh` | The image: Debian bookworm plus the tools the program actually calls (`curl jq openssl procps iproute2 python3 socat unzip tar cron`). The entrypoint installs on the first start (adding `--yes --firewall no` itself, never twice), keeps an existing installation on later starts so the keys and UUIDs survive a redeploy, and then `exec`s `vt run`. Arguments before `--` go to the install, after it to `vt run`; `VT_INSTALL_ARGS`, `VT_RUN_ARGS` and `VT_FORCE_INSTALL` (which bypasses the "keep it" branch, not just appends `--force`) are honoured. |
 
-### Tests (`PASS: 196` -> `252`)
+### Tests (`PASS: 196` -> `303`)
 
 A new stage, `6/7 container services (no systemd)`, installs with
 `VT_SKIP_SYSTEMD=1` and the real service layer, then drives it end to end:
@@ -178,3 +178,40 @@ in the first draft of the entrypoint.
 Unit tests also assert `service_backend`, `run_supervisor_pid` (missing / stale
 / garbage / live pid file) and that `cmd_run` and the rest of the service layer
 are actually defined after sourcing.
+
+---
+
+## 7. A fourth mode for platforms that terminate TLS: `ws-edge`
+
+Reported while deploying on Railway: the tunnel ran, the port listened, and
+the client still could not connect - `dial tcp <ip>:<port>: i/o timeout` on a
+TCP-proxy address, while port 443 to the same host answered. That is the
+network in front of the client dropping everything that is not 443, which no
+amount of server-side fixing can change.
+
+`ws-edge` moves the TLS to whatever terminates it already:
+
+| Piece | ws-tls (was) | ws-edge (new) |
+|---|---|---|
+| Container inbound | WebSocket **+ TLS**, own certificate, own port | WebSocket only, no `security`, no `tlsSettings`, no certificate |
+| TLS terminator | the container | the platform domain / CDN |
+| Client link | `wss://<host>:<port>` with the container's cert | `wss://<domain>:443` - passes wherever HTTPS passes |
+| Extra setup | open the port in every firewall | point the platform's domain at the tunnel port |
+
+* `lib/config_gen.sh`: `_stream_ws_plain` (no `security` key at all - newer Xray
+  accepts `"none"`, older versions do not) and `_client_stream_ws_edge`; the
+  client's `vnext` port becomes `VT_EDGE_PORT` (443) instead of the local port.
+* `lib/client_gen.sh`: the share link switches to `security=tls` on port 443,
+  and `config.txt` says where clients connect and on which port the container
+  listens.
+* `lib/install.sh`: wizard option 4, `--mode ws-edge`, no certificate step at
+  all, and the host defaults to `RAILWAY_PUBLIC_DOMAIN` when the platform sets
+  it, so `vt install --mode ws-edge --yes` needs no arguments on Railway.
+* `lib/status.sh` / `vt switch-mode`: converting an existing install, and a
+  `Clients connect to:` row in `vt status`.
+* `cmd_run` now refuses to start where systemd runs: it would have taken the
+  tunnel over from `xray.service` (killing a process systemd owns) and raced
+  it for the port. A normal VPS is therefore never touched by `vt run`.
+* `tests/`: a new e2e case (`ws-edge-railway-domain`), per-mode assertions
+  (no certificate file, no `tlsSettings`, client on 443) and unit tests for the
+  link; `tests/validate_config.py` now accepts a security-less ws inbound.

@@ -161,6 +161,10 @@ wizard_ask_mode() {
    2) WebSocket + TLS on port 443 - closest to an ordinary website; needs a
                  TLS certificate (domain, or an IP-address certificate).
    3) TCP + TLS on a custom port - needs a TLS certificate.
+   4) WebSocket behind the platform/CDN edge - for Railway, Fly.io, Cloudflare
+                 or nginx: TLS ends at the edge (port 443, never blocked) and
+                 the container only sees plain WebSocket. No certificate here,
+                 no extra port to open, nothing to renew.
   ───────────────────────────────────────────────────────────────────────
 TXT
   local def=1
@@ -169,20 +173,23 @@ TXT
       reality) def=1 ;;
       ws-tls)  def=2 ;;
       tcp-tls) def=3 ;;
-      *) die "unknown --mode: $WIZ_MODE (expected reality, ws-tls or tcp-tls)" ;;
+      ws-edge) def=4 ;;
+      *) die "unknown --mode: $WIZ_MODE (expected reality, ws-tls, tcp-tls or ws-edge)" ;;
     esac
   fi
   local idx
   menu_pick idx "choose the tunnel mode:" \
     "REALITY (no certificate - recommended)" \
     "WebSocket + TLS (port 443)" \
-    "TCP + TLS (custom port)"
+    "TCP + TLS (custom port)" \
+    "WebSocket behind the platform edge (Railway/CDN)"
   if [[ -n "$WIZ_MODE" ]]; then idx="$def"; fi
 
   case "$idx" in
     1) VT_MODE="reality"; VT_FLOW="xtls-rprx-vision" ;;
     2) VT_MODE="ws-tls";  VT_FLOW="" ;;
     3) VT_MODE="tcp-tls"; VT_FLOW="xtls-rprx-vision" ;;
+    4) VT_MODE="ws-edge"; VT_FLOW="" ;;
   esac
   log_ok "selected mode: ${VT_MODE}"
 
@@ -193,7 +200,58 @@ TXT
     return 0
   fi
 
+  if [[ "$VT_MODE" == "ws-edge" ]]; then
+    # The platform terminates TLS, so there is no certificate here at all.
+    VT_CERT_MODE="none"
+    VT_SELF_SIGNED="0"
+    VT_REJECT_UNKNOWN_SNI="0"
+    wizard_ask_edge_host
+    return 0
+  fi
+
   wizard_ask_cert
+}
+
+# The public host clients connect to in ws-edge mode: the platform's own
+# domain (Railway *.up.railway.app, Fly *.fly.dev) or a CDN/custom domain in
+# front of it. Nothing is resolved or certificate-checked - the program only
+# needs the name to put into the client config.
+wizard_ask_edge_host() {
+  cat <<'TXT'
+
+  ── step 3: the address clients connect to ──────────────────────────────
+  Give the hostname the platform gave you, without a scheme or a port.
+  Railway :  your-service.up.railway.app     (Settings -> Networking -> Domain)
+  Fly.io  :  your-app.fly.dev
+  Cloudflare / your own domain: whatever CNAMEs to the platform.
+  TLS is handled there on port 443; the certificate in this container is
+  irrelevant, which is why none is created.
+  ───────────────────────────────────────────────────────────────────────
+TXT
+  # The platform usually tells us: Railway injects RAILWAY_PUBLIC_DOMAIN (and
+  # RAILWAY_TCP_PROXY_DOMAIN for a TCP proxy), so `vt install --mode ws-edge
+  # --yes` needs no input at all there.
+  local plat="${VT_PLATFORM_DOMAIN:-${RAILWAY_PUBLIC_DOMAIN:-}}"
+  local host="${WIZ_DOMAIN:-${plat}}"
+  if [[ -n "$host" ]]; then
+    host=$(normalise_domain "$host")
+  elif [[ "$VT_ASSUME_YES" == "1" ]]; then
+    die "ws-edge needs the public hostname: pass --domain <your-service.up.railway.app>"
+    host=$(normalise_domain "$plat")
+  else
+    ask host "public hostname clients connect to" ""
+    host=$(normalise_domain "$host")
+  fi
+  while ! is_valid_domain "$host"; do
+    log_err "'$host' is not a valid hostname."
+    ask host "public hostname clients connect to" ""
+    host=$(normalise_domain "$host")
+  done
+  VT_HOST="$host"
+  VT_DOMAIN="$host"
+  VT_TLS_SNI="$host"
+  VT_EDGE_PORT="${VT_EDGE_PORT:-443}"
+  log_ok "clients will connect to ${VT_HOST}:${VT_EDGE_PORT} (wss)"
 }
 
 wizard_ask_reality_target() {
@@ -354,7 +412,7 @@ wizard_ask_port() {
   # Internal API, only reachable from localhost.
   VT_API_PORT="$(random_port "$VT_PORT")"
 
-  if [[ "$VT_MODE" == "ws-tls" ]]; then
+  if [[ "$VT_MODE" == "ws-tls" || "$VT_MODE" == "ws-edge" ]]; then
     VT_WS_PATH="/$(rand_hex 16)/"
     log_ok "WebSocket path: ${VT_WS_PATH}"
   else
@@ -473,6 +531,11 @@ STUB
     ws-tls|tcp-tls)
       VT_REALITY_PRIVATE=""; VT_REALITY_PUBLIC=""; VT_REALITY_SHORTID=""
       obtain_certificate
+      ;;
+    ws-edge)
+      VT_REALITY_PRIVATE=""; VT_REALITY_PUBLIC=""; VT_REALITY_SHORTID=""
+      VT_CERT_MODE="none"
+      log_note "ws-edge: TLS is provided by the platform edge - no certificate here."
       ;;
   esac
 

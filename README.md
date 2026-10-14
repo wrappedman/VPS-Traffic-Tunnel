@@ -53,6 +53,36 @@ sudo vt
 
 ---
 
+## Behind a platform edge: wss on port 443 (Railway, Fly.io, Cloudflare)
+
+Platforms that give you a domain and terminate TLS themselves (Railway's
+`*.up.railway.app`, a Cloudflare-proxied hostname, an nginx in front) can carry
+the tunnel **on port 443** like ordinary HTTPS. That matters when the network
+in front of the server blocks everything except 443 - a very common situation -
+and it needs no TCP proxy, no open port and no certificate:
+
+```bash
+# run inside the container (Railway injects RAILWAY_PUBLIC_DOMAIN itself)
+sudo vt install --mode ws-edge --domain my-service.up.railway.app --yes
+sudo vt run
+```
+
+`ws-edge` creates a plain WebSocket inbound on the port the platform gave you
+(`$PORT`, or `--port`), without any TLS: the edge terminates TLS and forwards
+WebSocket to the container. The client config and the share link it prints are
+`wss://` on **port 443 of your domain**, so nothing else has to be opened.
+
+* Point the platform's domain at the tunnel port. On Railway the generated
+  domain has a target port (Settings -> Networking, or
+  `railway domain update <domain> --port <n>`); set it to the tunnel port.
+* `vt status` shows `Clients connect to: <domain>:443 (wss)`.
+* If the platform asks for a health-check path, leave it at `/` - the tunnel
+  answers WebSocket upgrades on its own random path and nothing else.
+* Switching an existing install: `vt switch-mode` -> "WebSocket behind the
+  platform edge".
+
+---
+
 ## Containers without systemd (Railway, Docker, Fly.io, LXC, WSL)
 
 There is no systemd inside a container, so there is nothing to register a
@@ -78,6 +108,9 @@ command that stays in the foreground, `vt run`:
 ```bash
 vt run      # supervisor: keeps Xray alive in the foreground
 ```
+
+`vt run` is for containers: on a machine with systemd it refuses to start
+(systemd already supervises `xray.service`; `VT_RUN_FORCE=1` overrides).
 
 `vt run` starts Xray, restarts it 3 seconds after a crash, and every
 `VT_SUPERVISE_INTERVAL` seconds (default 1800) renews the certificate when one
@@ -148,7 +181,7 @@ above) or the keys are regenerated with every new container.
 
 ---
 
-## Three tunnel modes
+## Tunnel modes
 
 ### 1) REALITY — recommended
 ```
@@ -359,7 +392,7 @@ The dry-run works through the `VT_ROOT` variable: every path is prefixed, so
 the real install flow executes end to end without touching the host.
 
 ```
-PASS: 252   FAIL: 0
+PASS: 303   FAIL: 0
 ```
 
 The findings behind the latest round of fixes are written up in
@@ -377,6 +410,8 @@ The findings behind the latest round of fixes are written up in
 | the service will not start | `sudo vt logs error` |
 | container: nothing listens after a deploy | use `vt run` as the start command; `vt start` alone dies with the container |
 | container: `vt status` says inactive | `sudo vt start`, then `sudo vt logs` (journald does not exist there) |
+| client cannot reach the server on a non-443 port | use `--mode ws-edge` (wss on 443 through the platform domain) instead of a TCP proxy |
+| Railway: 502 / "application failed to respond" | the domain's target port is not the port the tunnel listens on - set it (`railway domain update`) |
 | slow | `sysctl net.ipv4.tcp_congestion_control` should say `bbr` |
 
 More: [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md)

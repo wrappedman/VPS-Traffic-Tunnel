@@ -149,10 +149,10 @@ TXT
   local cur="${VT_MODE:-?}"
   local idx
   menu_pick idx "current mode: ${cur} - new mode:" \
-    "REALITY" "WebSocket + TLS" "TCP + TLS"
+    "REALITY" "WebSocket + TLS" "TCP + TLS" "WebSocket behind the platform edge"
   local new
   case "$idx" in
-    1) new="reality" ;; 2) new="ws-tls" ;; 3) new="tcp-tls" ;;
+    1) new="reality" ;; 2) new="ws-tls" ;; 3) new="tcp-tls" ;; 4) new="ws-edge" ;;
   esac
   VT_MODE="$new"
   case "$new" in
@@ -167,6 +167,16 @@ TXT
       [[ -n "${VT_REALITY_SNI:-}" ]] || VT_REALITY_SNI="www.microsoft.com"
       VT_REALITY_DEST="${VT_REALITY_SNI}:443"
       VT_HOST="${VT_PUBLIC_IP:-$(detect_public_ipv4 || echo 127.0.0.1)}"
+      ;;
+    ws-edge)
+      VT_FLOW=""
+      [[ -n "${VT_WS_PATH:-}" ]] || VT_WS_PATH="/$(rand_hex 16)/"
+      VT_HOST="${VT_DOMAIN:-${VT_HOST}}"
+      VT_CERT_MODE="none"
+      VT_SELF_SIGNED="0"
+      VT_REJECT_UNKNOWN_SNI="0"
+      VT_EDGE_PORT="${VT_EDGE_PORT:-443}"
+      log_ok "ws-edge: clients connect to ${VT_HOST}:${VT_EDGE_PORT} (wss)"
       ;;
     ws-tls|tcp-tls)
       [[ "$new" == "ws-tls" ]] && VT_FLOW="" || VT_FLOW="xtls-rprx-vision"

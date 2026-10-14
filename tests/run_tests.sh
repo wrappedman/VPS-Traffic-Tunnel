@@ -119,6 +119,8 @@ e2e_case "ws-tls-domain-selfsigned" \
   --mode ws-tls --domain tunnel.example.com --cert selfsigned --port 443 --email alice
 e2e_case "tcp-tls-ip-letsencrypt" \
   --mode tcp-tls --cert letsencrypt-ip --port random --email bob
+e2e_case "ws-edge-railway-domain" \
+  --mode ws-edge --domain vtt-demo.up.railway.app --port 8080 --email main
 e2e_case "ws-tls-domain-letsencrypt" \
   --mode ws-tls --domain proxy.example.org --cert letsencrypt-domain --acme standalone --port 443
 

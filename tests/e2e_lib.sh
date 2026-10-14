@@ -140,6 +140,29 @@ e2e_case() {
       assert_contains "$name: cert path recorded in state" "$(cat "$etc/vt.env")" \
         'TLS_CERT_FILE="/etc/vt/certs/fullchain.pem"'
       ;;
+    ws-edge)
+      # TLS is terminated in front of the container: no certificate here, no
+      # tlsSettings in the inbound, and the client speaks wss to port 443.
+      assert_json "$name: edge network is ws" '.inbounds[0].streamSettings.network == "ws"' "$conf"
+      assert_json "$name: edge has no tls" '.inbounds[0].streamSettings | has("tlsSettings") | not' "$conf"
+      assert_json "$name: edge has no tls security" \
+        '.inbounds[0].streamSettings.security == null' "$conf"
+      assert_json "$name: edge ws path starts with /" \
+        '.inbounds[0].streamSettings.wsSettings.path | startswith("/")' "$conf"
+      assert_json "$name: edge clients have no flow" \
+        '.inbounds[0].settings.clients[0] | has("flow") | not' "$conf"
+      assert_json "$name: edge client uses 443" \
+        '.outbounds[0].settings.vnext[0].port == 443' "$root/etc/vt/client.json"
+      assert_json "$name: edge client asks for TLS" \
+        '.outbounds[0].streamSettings.security == "tls"' "$root/etc/vt/client.json"
+      if [[ -f "$etc/certs/fullchain.pem" ]]; then
+        bad "$name: no certificate is created" "found $etc/certs/fullchain.pem"
+      else
+        ok "$name: no certificate is created"
+      fi
+      assert_contains "$name: the link points at the edge port" \
+        "$(cat "$etc/config.txt")" "the edge"
+      ;;
   esac
 
   # The API must never be exposed publicly.
@@ -500,6 +523,24 @@ FAKE
     pkill -f "$bin run" >/dev/null 2>&1 || true
   else
     ok "container: vt stop shuts the vt run supervisor down"
+  fi
+
+  # On a systemd machine `vt run` must refuse: systemd already supervises xray,
+  # and two supervisors would fight over the port (this guard exists because
+  # the command used to take the tunnel over, killing the systemd-managed
+  # process behind systemd's back).
+  if [[ -d /run/systemd/system ]]; then
+    local shimdir="$WORK/systemd-shim"
+    mkdir -p "$shimdir"
+    printf '#!/bin/sh\nexit 0\n' >"$shimdir/systemctl"
+    chmod +x "$shimdir/systemctl"
+    assert_contains "container: vt run refuses where systemd is in charge" \
+      "$(env VT_ROOT="$root" VT_ASSUME_YES=1 VT_SKIP_DOWNLOADS=1 VT_SKIP_APT=1 \
+             VT_SKIP_SERVICE=0 VT_NO_COLOR=1 PATH="$shimdir:$PATH" \
+             timeout 20 "$REPO/vt" run 2>&1 || true)" \
+      "this machine uses systemd"
+  else
+    ok "container: vt run refuses where systemd is in charge (skipped: no systemd here)"
   fi
 
   # A process called xray that is not *this* root's binary has to be left

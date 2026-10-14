@@ -206,6 +206,19 @@ service_xray() {
 cmd_run() {
   local bin conf interval child="" now last=0
   bin=$(p "$R_XRAY_BIN"); conf=$(p "$R_XRAY_CONF")
+
+  # A machine with systemd already has a supervisor (xray.service). Running a
+  # second one here would fight it for the port - and this command would even
+  # take over (and kill) the process systemd owns. Refuse, unless the user
+  # really means it.
+  if systemd_running && [[ "${VT_RUN_FORCE:-0}" != "1" ]]; then
+    log_err "this machine uses systemd: the tunnel is already supervised by xray.service."
+    log_note "use 'vt restart' / 'vt status' / 'vt logs' instead."
+    log_note "'vt run' is for containers without systemd (Docker/Railway/Fly.io);"
+    log_note "if you really want it here, start it with VT_RUN_FORCE=1."
+    return 1
+  fi
+
   is_installed || log_warn "no install state found - running anyway."
 
   state_load   # VT_CERT_MODE / VT_PORT for the periodic check
@@ -491,6 +504,9 @@ show_service_status() {
   printf '  %-22s %s\n' "Started:" "$uptime"
   printf '  %-22s %s\n' "Port listening:" "$listening (${VT_PORT:-?})"
   printf '  %-22s %s\n' "Xray version:" "$(xray_installed_version 2>/dev/null || echo '—')"
+  if [[ "${VT_MODE:-}" == "ws-edge" && -n "${VT_HOST:-}" ]]; then
+    printf '  %-22s %s\n' "Clients connect to:" "${VT_HOST}:${VT_EDGE_PORT:-443} (wss)"
+  fi
   printf '  %-22s %s\n' "Mode:" "${VT_MODE:-?}"
   printf '  %-22s %s\n' "Certificate:" "$(cert_summary)"
   printf '  %-22s %s\n' "Auto renewal:" "$(cert_renewal_job_active || echo '—')"

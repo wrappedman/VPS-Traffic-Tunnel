@@ -7,6 +7,12 @@
 #   ws-tls   : VLESS + WebSocket + TLS on port 443. Needs a certificate and
 #              looks like ordinary HTTPS traffic.
 #   tcp-tls  : VLESS + TCP + TLS on a random port. Needs a certificate.
+#   ws-edge  : VLESS + WebSocket *without* TLS, for a host that terminates TLS
+#              itself and forwards plain WebSocket traffic (Railway/Fly.io
+#              domain, Cloudflare, nginx). The client still speaks wss:// to
+#              port 443 - the container only ever sees WebSocket.
+#              On Railway this is the mode that needs no TCP proxy, so the
+#              usual blocking of non-443 ports by the ISP never applies.
 
 # Private address ranges. Proxied connections to these are dropped so the
 # tunnel cannot be abused to scan the VPS provider's internal network.
@@ -24,7 +30,7 @@ build_xray_config() {
 
   case "$mode" in
     reality|tcp-tls) flow="${VT_FLOW:-xtls-rprx-vision}" ;;
-    ws-tls) flow="" ;;
+    ws-tls|ws-edge) flow="" ;;
     *) fail "unknown mode: $mode" ;;
   esac
   clients=$(users_clients_json "$flow")
@@ -37,6 +43,7 @@ build_xray_config() {
     reality)  stream=$(_stream_reality) ;;
     tcp-tls)  stream=$(_stream_tls_tcp) ;;
     ws-tls)   stream=$(_stream_tls_ws) ;;
+    ws-edge)  stream=$(_stream_ws_plain) ;;
   esac
 
   local rules
@@ -241,6 +248,25 @@ _stream_tls_ws() {
 EOF
 }
 
+# Plain WebSocket: the TLS is terminated by the platform/CDN in front of us
+# (Railway's *.up.railway.app edge, Cloudflare, ...), so the inbound carries
+# no certificate, no tlsSettings and no `security` key at all - which is how
+# "no TLS" is spelled in every Xray config in the wild.
+_stream_ws_plain() {
+  local path="${VT_WS_PATH:-/}"
+  # No "security" key on purpose: Xray's default is plain, and spelling it out
+  # as "none" is accepted by recent versions but rejected by older ones.
+  cat <<EOF
+{
+        "network": "ws",
+        "wsSettings": {
+          "acceptProxyProtocol": false,
+          "path": "$path"
+        }
+      }
+EOF
+}
+
 # Extra routing rules that depend on downloaded geo databases.
 _routing_rules() {
   local out=""
@@ -284,6 +310,9 @@ apply_config() {
 build_client_config() {
   local out="$1"
   local mode="${VT_MODE:?}" host="${VT_HOST:?}" port="${VT_PORT:?}"
+  # In ws-edge mode the container listens on VT_PORT but clients connect to the
+  # TLS edge in front of it (Railway: 443 on the generated domain).
+  if [[ "$mode" == "ws-edge" ]]; then port="${VT_EDGE_PORT:-443}"; fi
   local email uuid flow="" user_json stream_json insecure="false"
   email="${VT_EMAIL:-main}"
   uuid=$(users_get_uuid "$email")
@@ -305,6 +334,10 @@ build_client_config() {
     ws-tls)
       user_json=$(_client_user "$uuid" "")
       stream_json=$(_client_stream_ws "$insecure")
+      ;;
+    ws-edge)
+      user_json=$(_client_user "$uuid" "")
+      stream_json=$(_client_stream_ws_edge)
       ;;
   esac
   [[ -n "$user_json" && -n "$stream_json" ]] || fail "unknown mode: $mode"
@@ -399,6 +432,27 @@ _client_stream_tls() {
           "allowInsecure": $insecure,
           "fingerprint": "chrome",
           "alpn": ["h2", "http/1.1"]
+        }
+      }
+EOF
+}
+
+# ws-edge: wss:// to the domain, but the certificate belongs to the platform
+# edge, so there is nothing to skip and nothing to pin.
+_client_stream_ws_edge() {
+  cat <<EOF
+{
+        "network": "ws",
+        "security": "tls",
+        "wsSettings": {
+          "path": "${VT_WS_PATH:-/}",
+          "headers": { "Host": "${VT_HOST}" }
+        },
+        "tlsSettings": {
+          "serverName": "${VT_HOST}",
+          "allowInsecure": false,
+          "fingerprint": "chrome",
+          "alpn": ["http/1.1"]
         }
       }
 EOF

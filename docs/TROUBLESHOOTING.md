@@ -184,7 +184,39 @@ sudo vt logs follow             # says that journald is missing
 
 ---
 
-## 9. Files that are useful in a bug report
+## 9. Nothing gets through on a non-443 port (blocked by the network)
+
+Symptom: the tunnel is running (`vt status` says active, the port is
+listening), but the client times out while dialling your proxy address. A TCP
+connect from outside dies without an answer, and the client log shows
+`dial tcp <ip>:<port>: i/o timeout`.
+
+That is a network in front of you dropping the port (or the whole address
+range) - very common on mobile/ISP networks for anything that is not 443.
+
+**Fix: put the tunnel behind the TLS edge of your platform.**
+
+```bash
+# Railway (RAILWAY_PUBLIC_DOMAIN is already in the environment):
+sudo vt install --mode ws-edge --domain my-service.up.railway.app --yes
+# or convert an existing install:
+sudo vt switch-mode        # -> "WebSocket behind the platform edge"
+```
+
+Then point the platform's domain at the tunnel port (Railway: the domain's
+target port in Settings -> Networking) and import the link `vt viewconfig`
+prints: it is `wss://<domain>:443`, so it passes anywhere HTTPS passes.
+
+Diagnosis you can do yourself:
+* `nc -vz <domain> 443` from the client network - works? then the edge is fine.
+* `nc -vz <domain> <non-443-port>` - fails while 443 works? then it is the
+  port/network, not the server.
+* `vt logs` on the server shows nothing at all when the client tries: the
+  traffic never arrived, so the problem is outside the container.
+
+---
+
+## 10. Files that are useful in a bug report
 
 ```bash
 sudo vt doctor

@@ -53,6 +53,33 @@ sudo vt
 
 ---
 
+## پشت لبه‌ی پلتفرم: wss روی پورت ۴۴۳ (Railway، Fly.io، Cloudflare)
+
+پلتفرم‌هایی که خودشان دامنه می‌دهند و TLS را تمام می‌کنند (دامنه‌ی `*.up.railway.app`
+ریلیوی، دامنه‌ی پشت Cloudflare، یک nginx جلوی سرور) می‌توانند تونل را **روی پورت
+۴۴۳** مثل یک سایت HTTPS عادی حمل کنند. این دقیقاً همان حالتی است که شبکه‌ی جلوی
+سرور همه‌چیز جز ۴۴۳ را می‌بندد — و به هیچ TCP Proxy، پورت باز یا گواهی‌نامه‌ای
+نیاز ندارد:
+
+```bash
+# داخل کانتینر (ریلیوی خودش RAILWAY_PUBLIC_DOMAIN را ست می‌کند)
+sudo vt install --mode ws-edge --domain my-service.up.railway.app --yes
+sudo vt run
+```
+
+حالت `ws-edge` یک inbound ساده‌ی WebSocket روی همان پورتی که پلتفرم داده (`$PORT`
+یا `--port`) می‌سازد، **بدون TLS**؛ لبه TLS را تمام و WebSocket را به کانتینر
+پاس می‌دهد. لینک و کانفیگ کلاینتی که چاپ می‌شود `wss://` روی **پورت ۴۴۳ دامنه‌ی
+شما** است، پس نیازی به باز کردن چیز دیگری نیست.
+
+* دامنه‌ی پلتفرم را به پورت تونل وصل کنید. در Railway دامنه یک «target port»
+  دارد (Settings → Networking یا `railway domain update <domain> --port <n>`)
+  که باید برابر پورت تونل باشد.
+* در `vt status` خط `Clients connect to: <domain>:443 (wss)` را می‌بینید.
+* تغییر یک نصب موجود: `vt switch-mode` → گزینه‌ی «WebSocket behind the platform edge».
+
+---
+
 ## کانتینر بدون systemd (Railway، Docker، Fly.io، LXC، WSL)
 
 داخل کانتینر systemd وجود ندارد، پس چیزی نیست که سرویس را به آن بسپاریم. نصب‌کننده
@@ -328,7 +355,7 @@ sudo vt restore <file>      # بازگردانی (‎--force بدون پرسش)
 نصب خشک با متغیر `VT_ROOT` کار می‌کند: تمام مسیرها پیشوند می‌گیرند، بنابراین کل جریان نصب واقعاً اجرا می‌شود بدون اینکه به سیستم دست بزند.
 
 ```
-PASS: 252   FAIL: 0
+PASS: 303   FAIL: 0
 ```
 
 گزارش کامل باگ‌هایی که در بازبینی پیدا و اصلاح شدند:
@@ -346,6 +373,8 @@ PASS: 252   FAIL: 0
 | سرویس بالا نمی‌آید | `sudo vt logs error` |
 | کانتینر: بعد از هر ری‌دیپلوی چیزی گوش نمی‌دهد | به‌عنوان Start Command از `vt run` استفاده کنید؛ `vt start` تنها با کانتینر از بین می‌رود |
 | کانتینر: `vt status` می‌گوید inactive | `sudo vt start` و بعد `sudo vt logs` (در کانتینر journald وجود ندارد) |
+| کلاینت به پورت غیر ۴۴۳ وصل نمی‌شود | به‌جای TCP Proxy از `--mode ws-edge` استفاده کنید (wss روی ۴۴۳ از طریق دامنه‌ی پلتفرم) |
+| Railway: خطای 502 | «target port» دامنه با پورت تونل یکی نیست — با `railway domain update` درستش کنید |
 | سرعت کم است | `sysctl net.ipv4.tcp_congestion_control` باید `bbr` باشد |
 
 جزئیات بیشتر: [`docs/TROUBLESHOOTING.md`](TROUBLESHOOTING.md)

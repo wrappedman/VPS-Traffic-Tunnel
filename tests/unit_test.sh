@@ -348,6 +348,26 @@ grep -q '^TLS_SNI="a%b&c_d-e"$' "$VT_ROOT$R_STATE" \
   || bad "state file is not escaped on disk" "$(grep '^TLS_SNI=' "$VT_ROOT$R_STATE")"
 VT_TLS_SNI=""
 
+# --- ws-edge share link ---------------------------------------------------
+# Railway/CDN mode: the client talks wss:// to port 443 of the platform domain
+# while the container listens on its own port without any TLS.
+VT_MODE="ws-edge"; VT_HOST="vtt.up.railway.app"; VT_PORT="8080"
+VT_EDGE_PORT="443"; VT_WS_PATH="/abc123/"; VT_EMAIL="main"; VT_SELF_SIGNED="0"
+edge_link=$(share_link main)
+[[ "$edge_link" == vless://* ]] \
+  && ok "ws-edge share link is a vless URL" \
+  || bad "ws-edge share link is a vless URL" "got [$edge_link]"
+for want in "type=ws" "security=tls" "@vtt.up.railway.app:443?" \
+            "sni=vtt.up.railway.app" "path=%2Fabc123%2F" "host=vtt.up.railway.app"; do
+  [[ "$edge_link" == *"$want"* ]] \
+    && ok "ws-edge link has $want" \
+    || bad "ws-edge link has $want" "got [$edge_link]"
+done
+[[ "$edge_link" != *"reality"* ]] \
+  && ok "ws-edge link has no reality parameters" \
+  || bad "ws-edge link has no reality parameters" "got [$edge_link]"
+VT_MODE="reality"; VT_HOST="203.0.113.7"; VT_PORT="44311"; VT_WS_PATH=""
+
 # --- container service backend --------------------------------------------
 # Without systemd the tunnel is supervised by vt itself; every service call
 # must go to the process backend instead of becoming a systemctl no-op.
