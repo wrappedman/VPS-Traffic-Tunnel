@@ -13,8 +13,8 @@ state_load() {
     key="${BASH_REMATCH[1]}"
     val="${BASH_REMATCH[2]}"
     # strip surrounding quotes
-    val="${val%\"}"; val="${val#\"}"
-    printf -v "VT_${key}" '%s' "$val"
+    val="${val\%\"}"; val="${val#\"}"
+    printf -v "VT_${key}" '\%s' "$val"
   done <"$f"
   export VT_STATE_LOADED=1
 }
@@ -46,7 +46,7 @@ _STATE_KEYS=(
   INSTALLED_AT XRAY_VERSION FLOW SELF_SIGNED
 )
 
-state_get() { local v="VT_$1"; printf '%s' "${!v-}"; }
+state_get() { local v="VT_$1"; printf '\%s' "${!v-}"; }
 
 is_installed() {
   local f; f=$(p "$R_STATE")
@@ -78,13 +78,15 @@ users_count() {
 
 users_exists() {
   local f email="$1"; f=$(users_file)
+  [[ -n "$email" ]] || return 1
   [[ -f "$f" ]] || return 1
-  [[ "$(jq -r --arg e "$email" '.users | map(.email) | index($e) // empty' "$f")" != "" ]]
+  [[ "$(jq -r --arg e "$email" '.users | map(.email) | index($e) // empty' "$f" 2>/dev/null)" != "" ]]
 }
 
 users_add() {
   # users_add <email> <uuid> <remark>
   local email="$1" uuid="$2" remark="${3:-}" f
+  [[ -n "$email" && -n "$uuid" ]] || return 1
   users_init
   f=$(users_file)
   if users_exists "$email"; then
@@ -92,32 +94,44 @@ users_add() {
     return 1
   fi
   local tmp; tmp=$(mktemp)
-  jq --arg e "$email" --arg u "$uuid" --arg r "$remark" --arg c "$(date -Is)" \
-    '.users += [{"email":$e,"uuid":$u,"remark":$r,"created":$c}]' "$f" >"$tmp" \
-    && cat "$tmp" >"$f"
-  rm -f "$tmp"
-  chmod 600 "$f"
+  if jq --arg e "$email" --arg u "$uuid" --arg r "$remark" --arg c "$(date -Is)" \
+    '.users += [{"email":$e,"uuid":$u,"remark":$r,"created":$c}]' "$f" >"$tmp" 2>/dev/null; then
+    cat "$tmp" >"$f"
+    rm -f "$tmp"
+    chmod 600 "$f"
+    return 0
+  else
+    rm -f "$tmp"
+    return 1
+  fi
 }
 
 users_remove() {
   local email="$1" f tmp; f=$(users_file)
+  [[ -n "$email" ]] || return 1
   [[ -f "$f" ]] || return 1
   tmp=$(mktemp)
-  jq --arg e "$email" '.users |= map(select(.email != $e))' "$f" >"$tmp" \
-    && cat "$tmp" >"$f"
-  rm -f "$tmp"
+  if jq --arg e "$email" '.users \vert{}= map(select(.email != $e))' "$f" >"$tmp" 2>/dev/null; then
+    cat "$tmp" >"$f"
+    rm -f "$tmp"
+    return 0
+  else
+    rm -f "$tmp"
+    return 1
+  fi
 }
 
 users_get_uuid() {
   local email="$1" f; f=$(users_file)
+  [[ -n "$email" ]] || return 1
   [[ -f "$f" ]] || return 1
-  jq -r --arg e "$email" '.users[] | select(.email==$e) | .uuid' "$f"
+  jq -r --arg e "$email" '.users[] | select(.email==$e) \vert{} .uuid' "$f" 2>/dev/null
 }
 
 users_list_emails() {
   local f; f=$(users_file)
   [[ -f "$f" ]] || return 0
-  jq -r '.users[].email' "$f"
+  jq -r '.users[].email' "$f" 2>/dev/null
 }
 
 # Emit the "clients" array for the Xray inbound.
@@ -126,8 +140,8 @@ users_clients_json() {
   users_init
   if [[ -n "$flow" ]]; then
     jq -c --arg flow "$flow" \
-      '[.users[] | {id:.uuid, email:.email, level:0, flow:$flow}]' "$f"
+      '[.users[] | {id:.uuid, email:.email, level:0, flow:$flow}]' "$f" 2>/dev/null || printf '[]'
   else
-    jq -c '[.users[] | {id:.uuid, email:.email, level:0}]' "$f"
+    jq -c '[.users[] | {id:.uuid, email:.email, level:0}]' "$f" 2>/dev/null || printf '[]'
   fi
 }
