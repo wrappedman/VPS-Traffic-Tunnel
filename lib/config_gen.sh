@@ -42,23 +42,14 @@ build_xray_config() {
   local rules
   rules=$(_routing_rules)
 
-  local ad_rule=""
-  if [[ "${VT_AD_BLOCK:-0}" == "1" ]]; then
-    ad_rule=',
-    {
-      "type": "field",
-      "outboundTag": "block",
-      "domain": ["geosite:category-ads-all"]
-    }'
-  fi
   local tor_rule=""
   if [[ "${VT_BLOCK_TORRENT:-0}" == "1" ]]; then
     tor_rule=',
-    {
-      "type": "field",
-      "outboundTag": "block",
-      "protocol": ["bittorrent"]
-    }'
+      {
+        "type": "field",
+        "outboundTag": "block",
+        "protocol": ["bittorrent"]
+      }'
   fi
 
   mkdir -p "$(dirname "$out")"
@@ -105,7 +96,7 @@ build_xray_config() {
         "type": "field",
         "ip": $PRIVATE_CIDRS_JSON,
         "outboundTag": "block"
-      }${tor_rule}${ad_rule}${rules:+,
+      }${tor_rule}${rules:+,
 $rules}
     ]
   },
@@ -142,7 +133,7 @@ $rules}
       "tag": "direct",
       "protocol": "freedom",
       "settings": {
-        "domainStrategy": "UseIP"
+        "domainStrategy": "UseIPv4"
       }
     },
     {
@@ -183,16 +174,17 @@ _stream_reality() {
           "minClientVer": "",
           "maxClientVer": "",
           "maxTimeDiff": 0,
-          "shortIds": ["$shortid"]
+          "shortIds": ["", "$shortid"]
         }
       }
 EOF
 }
 
 _stream_tls_tcp() {
-  local sni="${VT_TLS_SNI:-${VT_HOST}}"
   local reject="false"
-  if [[ "${VT_REJECT_UNKNOWN_SNI:-1}" == "1" ]]; then reject="true"; fi
+  if [[ "${VT_REJECT_UNKNOWN_SNI:-0}" == "1" && "${VT_SELF_SIGNED:-0}" != "1" ]]; then
+    reject="true"
+  fi
   cat <<EOF
 {
         "network": "tcp",
@@ -212,29 +204,25 @@ _stream_tls_tcp() {
           "alpn": ["h2", "http/1.1"],
           "minVersion": "1.2",
           "maxVersion": "1.3",
-          "cipherSuites": "",
-          "rejectUnknownSni": $reject,
-          "serverName": "$sni"
+          "rejectUnknownSni": $reject
         }
       }
 EOF
 }
 
 _stream_tls_ws() {
-  local sni="${VT_TLS_SNI:-${VT_HOST}}"
   local path="${VT_WS_PATH:-/}"
   local reject="false"
-  if [[ "${VT_REJECT_UNKNOWN_SNI:-1}" == "1" ]]; then reject="true"; fi
+  if [[ "${VT_REJECT_UNKNOWN_SNI:-0}" == "1" && "${VT_SELF_SIGNED:-0}" != "1" ]]; then
+    reject="true"
+  fi
   cat <<EOF
 {
         "network": "ws",
         "security": "tls",
         "wsSettings": {
           "acceptProxyProtocol": false,
-          "path": "$path",
-          "headers": { "Host": "$sni" },
-          "maxEarlyData": 2048,
-          "earlyDataHeaderName": ""
+          "path": "$path"
         },
         "tlsSettings": {
           "certificates": [
@@ -247,9 +235,7 @@ _stream_tls_ws() {
           "alpn": ["http/1.1"],
           "minVersion": "1.2",
           "maxVersion": "1.3",
-          "cipherSuites": "",
-          "rejectUnknownSni": $reject,
-          "serverName": "$sni"
+          "rejectUnknownSni": $reject
         }
       }
 EOF
@@ -324,14 +310,14 @@ build_client_config() {
   "log": { "loglevel": "warning" },
   "dns": {
     "servers": [
-      { "address": "1.1.1.1", "port": 53, "domains": ["geosite:geolocation-!cn"] },
-      { "address": "8.8.8.8", "port": 53 }
+      "1.1.1.1",
+      "8.8.8.8"
     ]
   },
   "routing": {
-    "domainStrategy": "AsIs",
+    "domainStrategy": "IPIfNonMatch",
     "rules": [
-      { "type": "field", "ip": ["geoip:private"], "outboundTag": "direct" }
+      { "type": "field", "ip": $PRIVATE_CIDRS_JSON, "outboundTag": "direct" }
     ]
   },
   "inbounds": [
@@ -416,16 +402,13 @@ EOF
 
 _client_stream_ws() {
   local insecure="$1"
-  local enc_path; enc_path=$(urlencode "${VT_WS_PATH:-/}")
   cat <<EOF
 {
         "network": "ws",
         "security": "tls",
         "wsSettings": {
           "path": "${VT_WS_PATH:-/}",
-          "headers": { "Host": "${VT_HOST}" },
-          "maxEarlyData": 2048,
-          "earlyDataHeaderName": ""
+          "headers": { "Host": "${VT_HOST}" }
         },
         "tlsSettings": {
           "serverName": "${VT_HOST}",
@@ -435,5 +418,4 @@ _client_stream_ws() {
         }
       }
 EOF
-  : "$enc_path"
 }

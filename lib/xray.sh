@@ -121,10 +121,13 @@ gen_x25519() {
     local out
     out=$("$bin" x25519 2>/dev/null) || out=""
     local priv pub
-    priv=$(awk '/Private key/ {print $NF}' <<<"$out")
-    pub=$(awk '/Public key/  {print $NF}' <<<"$out")
+    # Support both legacy ("Private key:" / "Public key:") and modern
+    # ("PrivateKey:" / "Password:") Xray-core CLI output formats.
+    priv=$(awk -F': *' '/^[Pp]rivate ?[Kk]ey/ {print $2}' <<<"$out" | tr -d '[:space:]')
+    pub=$(awk -F': *' '/^([Pp]ublic ?[Kk]ey|[Pp]assword)/ {print $2}' <<<"$out" | tr -d '[:space:]')
     if [[ -n "$priv" && -n "$pub" ]]; then
-      X25519_PRIVATE="$priv"; X25519_PUBLIC="$pub"
+      X25519_PRIVATE="$priv"
+      X25519_PUBLIC="$pub"
       return 0
     fi
   fi
@@ -143,9 +146,23 @@ _gen_x25519_openssl() {
     || fail "failed to generate an X25519 key (openssl too old?)"
   openssl pkey -inform DER -in "$tmp/priv.der" -pubout -outform DER \
     -out "$tmp/pub.der" 2>/dev/null || fail "failed to derive the public key."
-  # PKCS#8 X25519 private key DER = 16 byte header + 32 byte key.
-  # SubjectPublicKeyInfo X25519 DER  = 12 byte header + 32 byte key.
-  X25519_PRIVATE=$(tail -c 32 "$tmp/priv.der" | _b64url)
+  # PKCS#8 X25519 private key DER = 16 byte header + 32 byte raw key.
+  # SubjectPublicKeyInfo X25519 DER  = 12 byte header + 32 byte public key.
+  # Xray-core expects the 32-byte private key to be RFC 7748 clamped before
+  # base64url encoding, whereas OpenSSL stores the unclamped seed in PKCS#8.
+  if have python3; then
+    X25519_PRIVATE=$(python3 - "$tmp/priv.der" <<'PY'
+import sys, base64
+b = bytearray(open(sys.argv[1], "rb").read()[-32:])
+b[0] &= 248
+b[31] &= 127
+b[31] |= 64
+print(base64.urlsafe_b64encode(bytes(b)).decode().rstrip("="), end="")
+PY
+)
+  else
+    X25519_PRIVATE=$(tail -c 32 "$tmp/priv.der" | _b64url)
+  fi
   X25519_PUBLIC=$(tail -c 32 "$tmp/pub.der" | _b64url)
 }
 

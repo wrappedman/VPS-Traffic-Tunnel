@@ -37,12 +37,12 @@ firewall_setup() {
     fi
   fi
 
-  ufw --force reset >/dev/null 2>&1 || true
   ufw default deny incoming >/dev/null 2>&1 || true
   ufw default allow outgoing >/dev/null 2>&1 || true
   ufw allow "${ssh_port}/tcp" comment 'SSH' >/dev/null 2>&1 || true
   ufw limit "${ssh_port}/tcp" >/dev/null 2>&1 || true
-  ufw allow "${tunnel_port}/tcp" comment 'VT tunnel' >/dev/null 2>&1 || true
+  ufw allow "${tunnel_port}/tcp" comment 'VT tunnel TCP' >/dev/null 2>&1 || true
+  ufw allow "${tunnel_port}/udp" comment 'VT tunnel UDP' >/dev/null 2>&1 || true
 
   local port
   for port in "${extra[@]}"; do
@@ -59,19 +59,24 @@ firewall_open_port() {
   have ufw || return 0
   ufw status 2>/dev/null | grep -qi '^Status: active' || return 0
   ufw allow "${port}/tcp" comment "$comment" >/dev/null 2>&1 || true
+  ufw allow "${port}/udp" comment "$comment" >/dev/null 2>&1 || true
 }
 
 firewall_close_port() {
   local port="$1"
   have ufw || return 0
   ufw delete allow "${port}/tcp" >/dev/null 2>&1 || true
+  ufw delete allow "${port}/udp" >/dev/null 2>&1 || true
 }
 
 firewall_remove_vt_rules() {
   have ufw || return 0
   local port
   for port in "${VT_PORT:-}" "${VT_API_PORT:-}"; do
-    [[ -n "$port" ]] && ufw delete allow "${port}/tcp" >/dev/null 2>&1 || true
+    if [[ -n "$port" ]]; then
+      ufw delete allow "${port}/tcp" >/dev/null 2>&1 || true
+      ufw delete allow "${port}/udp" >/dev/null 2>&1 || true
+    fi
   done
   log_note "tunnel firewall rules removed."
 }
