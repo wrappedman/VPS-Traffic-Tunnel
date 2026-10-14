@@ -1,0 +1,152 @@
+#!/usr/bin/env bash
+# vt — VPS-Traffic-Tunnel
+#
+# A single entry point that installs, manages and removes an always-on VLESS
+# tunnel on an Ubuntu/Debian VPS. Run it with no arguments for the menu.
+#
+# Usage: sudo ./vt          (interactive)
+#        sudo ./vt install  (scriptable, see --help)
+
+# No `set -e`: this is an interactive admin tool and several helpers return
+# non-zero on purpose (confirm, users_exists, port_in_use, ...). Every step
+# that must not fail calls `fail` explicitly instead.
+set -uo pipefail
+
+# --------------------------------------------------------------------------
+# Resolve our own directory so the library loads from wherever we live.
+# --------------------------------------------------------------------------
+VT_SELF="${BASH_SOURCE[0]}"
+while [[ -L "$VT_SELF" ]]; do
+  VT_SELF_TARGET=$(readlink "$VT_SELF")
+  [[ "$VT_SELF_TARGET" == /* ]] && VT_SELF="$VT_SELF_TARGET" \
+    || VT_SELF="$(dirname "$VT_SELF")/$VT_SELF_TARGET"
+done
+VT_DIR=$(cd "$(dirname "$VT_SELF")" && pwd)
+
+if [[ ! -d "$VT_DIR/lib" && -d /opt/vt/lib ]]; then
+  VT_DIR=/opt/vt
+fi
+
+# shellcheck source=lib/common.sh
+. "$VT_DIR/lib/common.sh"
+# shellcheck source=lib/net.sh
+. "$VT_DIR/lib/net.sh"
+# shellcheck source=lib/state.sh
+. "$VT_DIR/lib/state.sh"
+# shellcheck source=lib/xray.sh
+. "$VT_DIR/lib/xray.sh"
+# shellcheck source=lib/cert.sh
+. "$VT_DIR/lib/cert.sh"
+# shellcheck source=lib/config_gen.sh
+. "$VT_DIR/lib/config_gen.sh"
+# shellcheck source=lib/client_gen.sh
+. "$VT_DIR/lib/client_gen.sh"
+# shellcheck source=lib/sysprep.sh
+. "$VT_DIR/lib/sysprep.sh"
+# shellcheck source=lib/firewall.sh
+. "$VT_DIR/lib/firewall.sh"
+# shellcheck source=lib/service.sh
+. "$VT_DIR/lib/service.sh"
+# shellcheck source=lib/users.sh
+. "$VT_DIR/lib/users.sh"
+# shellcheck source=lib/install.sh
+. "$VT_DIR/lib/install.sh"
+# shellcheck source=lib/uninstall.sh
+. "$VT_DIR/lib/uninstall.sh"
+# shellcheck source=lib/status.sh
+. "$VT_DIR/lib/status.sh"
+# shellcheck source=lib/menu.sh
+. "$VT_DIR/lib/menu.sh"
+
+VT_LOG_FILE="$(p "$R_LOG")/vt.log"
+
+# --------------------------------------------------------------------------
+# Argument handling
+# --------------------------------------------------------------------------
+CMD="${1:-menu}"
+[[ $# -gt 0 ]] && shift || true
+
+# Informational commands are useful before (and without) root.
+case "$CMD" in
+  version|-v|--version) printf '%s %s\n' "$VT_PROJECT" "$VT_VERSION"; exit 0 ;;
+  help|-h|--help)       usage; exit 0 ;;
+esac
+
+require_root "$CMD"
+mkdir -p "$(p "$R_LOG")" 2>/dev/null || true
+state_load
+
+case "$CMD" in
+  menu|"")            main_menu ;;
+
+  install)
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --mode)          WIZ_MODE="$2"; shift 2 ;;
+        --domain)        WIZ_DOMAIN="$2"; shift 2 ;;
+        --cert)          WIZ_CERT="$2"; shift 2 ;;
+        --acme)          WIZ_ACME_METHOD="$2"; shift 2 ;;
+        --webroot)       WIZ_WEBROOT="$2"; shift 2 ;;
+        --dns-plugin)    WIZ_DNS_PROVIDER="$2"; shift 2 ;;
+        --dns-env)       WIZ_DNS_ENV="$2"; shift 2 ;;
+        --dns-token)     WIZ_DNS_TOKEN="$2"; shift 2 ;;
+        --sni)           WIZ_SNI="$2"; shift 2 ;;
+        --port)          WIZ_PORT="$2"; shift 2 ;;
+        --email)         WIZ_EMAIL="$2"; shift 2 ;;
+        --email-acme)    VT_ACME_EMAIL="$2"; shift 2 ;;
+        --firewall)      WIZ_FIREWALL="$2"; shift 2 ;;
+        --adblock)       [[ "$2" == "yes" ]] && WIZ_AD_BLOCK=1 || WIZ_AD_BLOCK=0; shift 2 ;;
+        --no-torrent)    [[ "$2" == "yes" ]] && WIZ_BLOCK_TORRENT=1 || WIZ_BLOCK_TORRENT=0; shift 2 ;;
+        --force)         VT_FORCE=1; shift ;;
+        --yes|-y)        VT_ASSUME_YES=1; shift ;;
+        *) die "unknown option: $1" ;;
+      esac
+    done
+    do_install
+    ;;
+
+  viewconfig|viewConfig|config|show)  cmd_view_config ;;
+  uninstall|remove)
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --force)      VT_FORCE=1; shift ;;
+        --purge)      VT_UNINSTALL_KEEP_ETC=n; shift ;;
+        --yes|-y)     VT_ASSUME_YES=1; shift ;;
+        *) die "unknown option: $1" ;;
+      esac
+    done
+    cmd_uninstall
+    ;;
+
+  status)             cmd_status ;;
+  logs)               cmd_logs "${1:-xray}" ;;
+  restart)            cmd_restart ;;
+  stop)               cmd_stop ;;
+  start)              cmd_start ;;
+  health)             run_health_check "${1:-no}" ;;
+  doctor)             cmd_doctor ;;
+
+  add-user)           cmd_add_user "${1:-}" ;;
+  rm-user)            cmd_remove_user "${1:-}" ;;
+  users|list-users)   cmd_list_users ;;
+  stats)              cmd_stats ;;
+  connections)        cmd_connections ;;
+  rotate-uuid)        cmd_rotate_uuid "${1:-}" ;;
+  rotate-keys)        cmd_rotate_keys ;;
+  port)               cmd_change_port "${1:-}" ;;
+  switch-mode)        cmd_switch_mode ;;
+  update|upgrade)     cmd_update ;;
+  renew-cert)         cmd_renew_cert "${1:-}" ;;
+  selfsigned-cert)    _selfsigned_now ;;
+  backup)             cmd_backup "${1:-}" ;;
+  restore)            cmd_restore "${1:-}" ;;
+  self-install)       cmd_self_install ;;
+
+  version|-v|--version) printf '%s %s\n' "$VT_PROJECT" "$VT_VERSION" ;;
+  help|-h|--help)     usage ;;
+  *)
+    log_err "unknown command: $CMD"
+    usage
+    exit 1
+    ;;
+esac

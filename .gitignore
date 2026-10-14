@@ -1,0 +1,19 @@
+# Build / test artefacts
+*.log
+/tmp/
+dist/
+
+# Local editor and OS noise
+.DS_Store
+*.swp
+*~
+.idea/
+.vscode/
+
+# Never commit machine state or secrets
+etc/
+*.pem
+*.key
+*.crt
+vt.env
+users.json

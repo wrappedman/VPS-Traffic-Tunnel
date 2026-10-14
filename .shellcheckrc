@@ -1,0 +1,3 @@
+# Multi-file sourced bash project: "unused" globals are shared across lib/*.
+# shellcheck shell=bash
+disable=SC2034
